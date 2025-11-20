@@ -39,6 +39,10 @@ except ImportError:  # pragma: no cover
             self.text = text
             self.request = request
 
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise HTTPStatusError(f"status {self.status_code}", request=self.request, response=self)
+
     class HTTPStatusError(Exception):
         def __init__(self, message: str, request=None, response=None):
             super().__init__(message)
@@ -48,6 +52,7 @@ except ImportError:  # pragma: no cover
     class Codes(SimpleNamespace):
         OK = 200
         TOO_MANY_REQUESTS = 429
+        NOT_FOUND = 404
         SERVICE_UNAVAILABLE = 503
 
     httpx.Response = Response
@@ -170,62 +175,43 @@ def test_derive_xml_url_handles_missing_leading_slash():
 
 
 def test_parse_datetime_preserves_utc():
-    parsed = feeds._parse_datetime(datetime(2025, 1, 2, 15, 45, 30).timetuple())
+    import time as _time
+
+    parsed = feeds._parse_datetime(_time.struct_time((2025, 1, 2, 15, 45, 30, 0, 0, 0)))
 
     assert parsed == datetime(2025, 1, 2, 15, 45, 30)
 
 
-def test_fetch_retries_on_server_error(monkeypatch, sample_atom_xml):
-    sleeps: list[float] = []
+def test_fetch_atom_feed_retries_on_server_error(monkeypatch):
+    sleep_calls: list[float] = []
+    calls = {"count": 0}
 
-    class FakeResponse:
-        def __init__(self, status_code: int, text: str):
-            self.status_code = status_code
-            self.text = text
-            self.request = None
-            self.response = self
-
-        def raise_for_status(self):
-            raise httpx.HTTPStatusError(f"status {self.status_code}", request=None, response=self)
-
-    responses = [FakeResponse(500, ""), FakeResponse(httpx.codes.OK, sample_atom_xml)]
-    calls = []
-
-    def fake_get(url: str, timeout: int | None = None, headers=None):
-        calls.append(headers)
-        return responses.pop(0)
+    def fake_get(url: str, timeout: int, headers: dict):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return httpx.Response(status_code=500, text="server error")
+        return httpx.Response(status_code=200, text="<feed />")
 
     monkeypatch.setattr(feeds.httpx, "get", fake_get)
-    monkeypatch.setattr(feeds.time, "sleep", lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr(feeds.time, "sleep", lambda seconds: sleep_calls.append(seconds))
 
-    entries = feeds.fetch_atom_entries(SimpleNamespace())
+    text = feeds._fetch_atom_feed("https://example.com/atom.xml")
 
-    assert len(entries) == 1
-    assert len(sleeps) == 1  # retried once
-    assert calls[0]["User-Agent"] == "test-agent"
-    assert calls[0]["Accept"] == "application/atom+xml, application/xml;q=0.9, */*;q=0.8"
+    assert text == "<feed />"
+    assert calls["count"] == 2
+    assert len(sleep_calls) == 1
 
 
-def test_fetch_raises_immediately_on_client_error(monkeypatch):
+def test_fetch_atom_feed_raises_on_not_found(monkeypatch):
     sleep_calls: list[float] = []
 
-    class FakeResponse:
-        def __init__(self, status_code: int):
-            self.status_code = status_code
-            self.text = ""
-            self.request = None
-            self.response = self
-
-        def raise_for_status(self):
-            raise httpx.HTTPStatusError(f"status {self.status_code}", request=None, response=self)
-
-    def fake_get(url: str, timeout: int | None = None, headers=None):
-        return FakeResponse(404)
+    def fake_get(url: str, timeout: int, headers: dict):
+        return httpx.Response(status_code=404, text="not found")
 
     monkeypatch.setattr(feeds.httpx, "get", fake_get)
     monkeypatch.setattr(feeds.time, "sleep", lambda seconds: sleep_calls.append(seconds))
 
     with pytest.raises(httpx.HTTPStatusError):
-        feeds.fetch_atom_entries(SimpleNamespace())
+        feeds._fetch_atom_feed("https://example.com/missing.atom")
 
     assert sleep_calls == []

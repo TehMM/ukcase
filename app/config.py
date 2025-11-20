@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     request_timeout_seconds: int = 20
     max_http_retries: int = 4
 
-    http_user_agent: str = "ukcase-scraper/0.1 (+contact: YOUR_CONTACT_HERE)"
+    http_user_agent: str = "ukcase-scraper/0.1 (+contact: CHANGE_ME)"
 
 
 @lru_cache(maxsize=1)
