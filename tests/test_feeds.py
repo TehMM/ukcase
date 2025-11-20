@@ -104,6 +104,7 @@ def _mock_settings(monkeypatch):
         request_timeout_seconds=5,
         max_http_retries=2,
         default_rate_limit_seconds=1.5,
+        http_user_agent="test-agent",
     )
     monkeypatch.setattr(feeds, "get_settings", lambda: fake_settings)
 
@@ -166,3 +167,64 @@ def test_derive_xml_url_handles_missing_leading_slash():
         feeds.derive_xml_url("ewhc/comm/2025/3036")
         == "https://caselaw.nationalarchives.gov.uk/ewhc/comm/2025/3036/data.xml"
     )
+
+
+def test_parse_datetime_preserves_utc():
+    parsed = feeds._parse_datetime(datetime(2025, 1, 2, 15, 45, 30).timetuple())
+
+    assert parsed == datetime(2025, 1, 2, 15, 45, 30)
+
+
+def test_fetch_retries_on_server_error(monkeypatch, sample_atom_xml):
+    sleeps: list[float] = []
+
+    class FakeResponse:
+        def __init__(self, status_code: int, text: str):
+            self.status_code = status_code
+            self.text = text
+            self.request = None
+            self.response = self
+
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError(f"status {self.status_code}", request=None, response=self)
+
+    responses = [FakeResponse(500, ""), FakeResponse(httpx.codes.OK, sample_atom_xml)]
+    calls = []
+
+    def fake_get(url: str, timeout: int | None = None, headers=None):
+        calls.append(headers)
+        return responses.pop(0)
+
+    monkeypatch.setattr(feeds.httpx, "get", fake_get)
+    monkeypatch.setattr(feeds.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    entries = feeds.fetch_atom_entries(SimpleNamespace())
+
+    assert len(entries) == 1
+    assert len(sleeps) == 1  # retried once
+    assert calls[0]["User-Agent"] == "test-agent"
+
+
+def test_fetch_raises_immediately_on_client_error(monkeypatch):
+    sleep_calls: list[float] = []
+
+    class FakeResponse:
+        def __init__(self, status_code: int):
+            self.status_code = status_code
+            self.text = ""
+            self.request = None
+            self.response = self
+
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError(f"status {self.status_code}", request=None, response=self)
+
+    def fake_get(url: str, timeout: int | None = None, headers=None):
+        return FakeResponse(404)
+
+    monkeypatch.setattr(feeds.httpx, "get", fake_get)
+    monkeypatch.setattr(feeds.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    with pytest.raises(httpx.HTTPStatusError):
+        feeds.fetch_atom_entries(SimpleNamespace())
+
+    assert sleep_calls == []

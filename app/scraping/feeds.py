@@ -1,6 +1,7 @@
 """Atom feed construction and parsing utilities."""
 from __future__ import annotations
 
+import random
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,7 +22,6 @@ BASE_ATOM_URL = "https://caselaw.nationalarchives.gov.uk/atom.xml"
 BASE_CANONICAL_PREFIX = "https://caselaw.nationalarchives.gov.uk"
 
 _DEFAULT_HEADERS = {
-    "User-Agent": "ukcase-scraper/0.1 (+https://github.com/TehMM/ukcase)",
     "Accept": "application/atom+xml, application/xml;q=0.9, */*;q=0.8",
 }
 
@@ -83,9 +83,18 @@ def derive_xml_url(canonical_uri: str) -> str:
 
 
 def _parse_datetime(value: Optional[time.struct_time]) -> Optional[datetime]:
+    """Convert a feedparser time.struct_time into a naive datetime interpreted as UTC."""
+
     if value is None:
         return None
-    return datetime.fromtimestamp(time.mktime(value))
+    return datetime(
+        value.tm_year,
+        value.tm_mon,
+        value.tm_mday,
+        value.tm_hour,
+        value.tm_min,
+        value.tm_sec,
+    )
 
 
 def _fetch_atom_feed(url: str) -> str:
@@ -93,23 +102,38 @@ def _fetch_atom_feed(url: str) -> str:
     timeout = settings.request_timeout_seconds
     max_retries = settings.max_http_retries
 
+    retryable_statuses = (httpx.codes.TOO_MANY_REQUESTS, httpx.codes.SERVICE_UNAVAILABLE)
     last_exception: Optional[Exception] = None
-    backoff = 1.0
+
     for attempt in range(1, max_retries + 1):
         try:
-            response = httpx.get(url, headers=_DEFAULT_HEADERS, timeout=timeout)
-            if response.status_code == httpx.codes.OK:
-                return response.text
-            if response.status_code not in (httpx.codes.TOO_MANY_REQUESTS, httpx.codes.SERVICE_UNAVAILABLE):
-                response.raise_for_status()
-            last_exception = httpx.HTTPStatusError(
-                f"Unexpected status code {response.status_code}", request=response.request, response=response
+            response = httpx.get(
+                url,
+                timeout=timeout,
+                headers={"User-Agent": settings.http_user_agent, **_DEFAULT_HEADERS},
             )
-        except Exception as exc:  # noqa: BLE001 - we want to retry all errors
+            status = response.status_code
+            if status == httpx.codes.OK:
+                return response.text
+
+            if status in retryable_statuses or 500 <= status < 600:
+                last_exception = httpx.HTTPStatusError(
+                    f"Unexpected status code {status}",
+                    request=response.request,
+                    response=response,
+                )
+            else:
+                response.raise_for_status()
+        except httpx.HTTPStatusError as exc:  # noqa: BLE001 - handled below
+            status_code = getattr(exc.response, "status_code", None)
+            if status_code not in retryable_statuses and not (status_code and 500 <= status_code < 600):
+                raise
             last_exception = exc
-        if attempt < max_retries:
-            time.sleep(backoff)
-            backoff *= 2
+        except Exception as exc:  # noqa: BLE001 - we want to retry all other errors
+            last_exception = exc
+
+        sleep_for = min(5.0, 0.5 * attempt) + random.uniform(0.0, 0.25)
+        time.sleep(sleep_for)
 
     if last_exception:
         raise last_exception

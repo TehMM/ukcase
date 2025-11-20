@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     request_timeout_seconds: int = 20
     max_http_retries: int = 4
 
+    http_user_agent: str = "ukcase-scraper/0.1 (+contact: YOUR_CONTACT_HERE)"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
