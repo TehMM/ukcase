@@ -15,4 +15,140 @@ If code diverges from that design, either:
 
 DATABASE_SCHEMA = r"""
 -- copy the SQL DDL from docs/design_framework.md here verbatim
+
+-- 1. Segments: configuration of feeds / searches
+CREATE TABLE segments (
+    id                  SERIAL PRIMARY KEY,
+    name                TEXT NOT NULL UNIQUE,
+    description         TEXT,
+
+    -- Mirrors advanced search fields; keep nullable as they are optional
+    query               TEXT,           -- main keyword/text query
+    courts              TEXT[],         -- e.g. ['ewhc/ch', 'ewhc/comm']
+    -- Additional advanced search fields for future use:
+    party               TEXT,
+    judge_filter        TEXT,
+    neutral_citation_filter TEXT,
+    date_from           DATE,
+    date_to             DATE,
+
+    -- Raw Atom URL override (if provided, we ignore the above fields for feed construction)
+    raw_atom_url        TEXT,
+
+    -- Backfill behaviour: 'NEW_ONLY', 'FULL', 'SINCE_DATE'
+    backfill_mode       TEXT NOT NULL DEFAULT 'NEW_ONLY',
+    backfill_since_date DATE,          -- only used when backfill_mode = 'SINCE_DATE'
+
+    -- Rate limiting: seconds between requests (per segment override)
+    rate_limit_seconds  NUMERIC(6, 2) DEFAULT 1.5, -- default ~1 request / 1.5s
+
+    -- ChangeDetection.io integration
+    changedetection_token TEXT UNIQUE, -- token segment mapping for webhook
+
+    active              BOOLEAN NOT NULL DEFAULT TRUE,
+
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_segments_active ON segments (active);
+CREATE INDEX idx_segments_changedetection_token ON segments (changedetection_token);
+
+
+-- 2. Judgments: canonical store of all judgments we know about
+CREATE TABLE judgments (
+    id                      BIGSERIAL PRIMARY KEY,
+
+    -- Canonical unique identity: path-like URI from caselaw site
+    canonical_uri           TEXT NOT NULL UNIQUE,
+    -- e.g. '/ewhc/comm/2025/3036'
+
+    -- Neutral citation & related metadata
+    neutral_citation        TEXT NOT NULL, -- e.g. '[2025] EWHC 3036 (Comm)'
+    neutral_citation_number INTEGER,       -- 3036
+    court_code              TEXT NOT NULL, -- e.g. 'ewhc/comm'
+    decision_date           DATE NOT NULL,
+    title                   TEXT NOT NULL, -- case title
+    parties                 TEXT,          -- free-text, possibly parsed from XML
+    judge                   TEXT,          -- free-text field
+
+    -- File storage (XML only for now)
+    xml_path                TEXT NOT NULL, -- local filesystem path or S3 key
+    xml_downloaded_at       TIMESTAMPTZ NOT NULL,
+
+    -- Judgment lifecycle status at the scraper layer
+    status                  TEXT NOT NULL DEFAULT 'DOWNLOADED',
+    -- Suggested values: 'DOWNLOADED', 'PARSING_FAILED', 'MISSING', 'DELETED'
+
+    -- RAG / AI pipeline integration (future-proofing)
+    rag_status              TEXT DEFAULT 'NOT_PROCESSED',
+    -- e.g. 'NOT_PROCESSED', 'QUEUED', 'EMBEDDED', 'SUMMARY_CREATED', 'FAILED'
+    rag_last_processed_at   TIMESTAMPTZ,
+    rag_version             INTEGER DEFAULT 1,
+    rag_external_id         TEXT, -- optional reference to external vector DB id
+
+    -- Segment linkage (judgment can be discovered by multiple segments)
+    -- We store only first-seen segment here for convenience; many-to-many is via run_items
+    first_seen_segment_id   INTEGER REFERENCES segments(id),
+    first_seen_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_judgments_decision_date ON judgments (decision_date);
+CREATE INDEX idx_judgments_court_code_decision_date ON judgments (court_code, decision_date);
+CREATE INDEX idx_judgments_rag_status ON judgments (rag_status);
+
+
+-- 3. Runs: each execution of a scraping job for a given segment
+CREATE TABLE runs (
+    id                  BIGSERIAL PRIMARY KEY,
+    segment_id          INTEGER NOT NULL REFERENCES segments(id),
+
+    trigger_type        TEXT NOT NULL,
+    -- 'MANUAL', 'WEBHOOK', 'SCHEDULED', etc.
+
+    started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at         TIMESTAMPTZ,
+    status              TEXT NOT NULL DEFAULT 'RUNNING',
+    -- 'RUNNING', 'SUCCESS', 'PARTIAL_SUCCESS', 'FAILED', 'CANCELLED'
+
+    total_items         INTEGER DEFAULT 0,
+    new_items           INTEGER DEFAULT 0,
+    skipped_items       INTEGER DEFAULT 0,
+    failed_items        INTEGER DEFAULT 0,
+
+    -- For debugging / audit
+    error_message       TEXT,
+
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_runs_segment_started_at ON runs (segment_id, started_at);
+
+
+-- 4. Run items: per-judgment outcome during a run
+CREATE TABLE run_items (
+    id                  BIGSERIAL PRIMARY KEY,
+    run_id              BIGINT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    judgment_id         BIGINT REFERENCES judgments(id),
+    canonical_uri       TEXT NOT NULL,
+    -- canonical_uri duplicates judgments.canonical_uri to allow run logging
+    -- even when the judgment insert fails
+
+    action              TEXT NOT NULL,
+    -- 'CREATED', 'UPDATED', 'SKIPPED_ALREADY_EXISTS', 'FAILED_DOWNLOAD', 'FAILED_PARSE'
+
+    status              TEXT NOT NULL DEFAULT 'SUCCESS',
+    -- 'SUCCESS', 'FAILED'
+
+    error_message       TEXT,
+
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_run_items_run_id ON run_items (run_id);
+CREATE INDEX idx_run_items_canonical_uri ON run_items (canonical_uri);
 """
