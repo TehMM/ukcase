@@ -203,6 +203,7 @@ def test_fetch_retries_on_server_error(monkeypatch, sample_atom_xml):
     assert len(entries) == 1
     assert len(sleeps) == 1  # retried once
     assert calls[0]["User-Agent"] == "test-agent"
+    assert calls[0]["Accept"] == "application/atom+xml, application/xml;q=0.9, */*;q=0.8"
 
 
 def test_fetch_raises_immediately_on_client_error(monkeypatch):

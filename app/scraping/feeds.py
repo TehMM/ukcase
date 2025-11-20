@@ -98,6 +98,12 @@ def _parse_datetime(value: Optional[time.struct_time]) -> Optional[datetime]:
 
 
 def _fetch_atom_feed(url: str) -> str:
+    """Fetch Atom feed text with retry/backoff and polite headers.
+
+    Retries are attempted for 429 and 5xx responses, with a capped linear
+    backoff plus small jitter. Client errors outside this set raise
+    immediately.
+    """
     settings = get_settings()
     timeout = settings.request_timeout_seconds
     max_retries = settings.max_http_retries
