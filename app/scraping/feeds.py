@@ -78,7 +78,12 @@ def derive_xml_url(canonical_uri: str) -> str:
 
 
 def _parse_datetime(value: Optional[time.struct_time]) -> Optional[datetime]:
-    """Convert a feedparser time.struct_time into a naive datetime interpreted as UTC."""
+    """Convert a feedparser time.struct_time into a naive datetime.
+
+    We reconstruct the datetime directly from the struct fields to avoid
+    local timezone conversion via time.mktime(), which can introduce
+    timezone-dependent offsets.
+    """
 
     if value is None:
         return None

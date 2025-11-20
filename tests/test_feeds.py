@@ -109,7 +109,7 @@ def _mock_settings(monkeypatch):
         request_timeout_seconds=5,
         max_http_retries=2,
         default_rate_limit_seconds=1.5,
-        http_user_agent="test-agent",
+        http_user_agent="ukcase-tests/0.1",
     )
     monkeypatch.setattr(feeds, "get_settings", lambda: fake_settings)
 
@@ -182,13 +182,17 @@ def test_parse_datetime_preserves_utc():
     assert parsed == datetime(2025, 1, 2, 15, 45, 30)
 
 
+def test_parse_datetime_handles_none():
+    assert feeds._parse_datetime(None) is None
+
+
 def test_fetch_atom_feed_retries_on_server_error(monkeypatch):
     sleep_calls: list[float] = []
-    calls = {"count": 0}
+    calls: list[dict] = []
 
     def fake_get(url: str, timeout: int, headers: dict):
-        calls["count"] += 1
-        if calls["count"] == 1:
+        calls.append(headers)
+        if len(calls) == 1:
             return httpx.Response(status_code=500, text="server error")
         return httpx.Response(status_code=200, text="<feed />")
 
@@ -198,8 +202,11 @@ def test_fetch_atom_feed_retries_on_server_error(monkeypatch):
     text = feeds._fetch_atom_feed("https://example.com/atom.xml")
 
     assert text == "<feed />"
-    assert calls["count"] == 2
+    assert len(calls) == 2
     assert len(sleep_calls) == 1
+
+    for hdrs in calls:
+        assert hdrs["User-Agent"] == "ukcase-tests/0.1"
 
 
 def test_fetch_atom_feed_raises_on_not_found(monkeypatch):
