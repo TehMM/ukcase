@@ -15,6 +15,7 @@ SessionLocal = sessionmaker(
     autoflush=False,
     autocommit=False,
     expire_on_commit=False,
+    future=True,
 )
 
 Base = declarative_base()
