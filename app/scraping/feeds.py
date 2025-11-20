@@ -20,6 +20,11 @@ else:  # pragma: no cover - runtime fallback when ORM dependencies are unavailab
 BASE_ATOM_URL = "https://caselaw.nationalarchives.gov.uk/atom.xml"
 BASE_CANONICAL_PREFIX = "https://caselaw.nationalarchives.gov.uk"
 
+_DEFAULT_HEADERS = {
+    "User-Agent": "ukcase-scraper/0.1 (+https://github.com/TehMM/ukcase)",
+    "Accept": "application/atom+xml, application/xml;q=0.9, */*;q=0.8",
+}
+
 
 @dataclass
 class AtomEntry:
@@ -39,6 +44,8 @@ class AtomEntry:
 def build_atom_url_for_segment(segment: Segment) -> str:
     """Construct the Atom feed URL for a segment following the design spec."""
 
+    # TODO: support party, judge_filter, neutral_citation_filter, date_from, and date_to
+    # when the Atom API parameters for these fields are confirmed.
     raw_atom_url = getattr(segment, "raw_atom_url", None)
     if raw_atom_url:
         return raw_atom_url
@@ -87,17 +94,22 @@ def _fetch_atom_feed(url: str) -> str:
     max_retries = settings.max_http_retries
 
     last_exception: Optional[Exception] = None
+    backoff = 1.0
     for attempt in range(1, max_retries + 1):
         try:
-            response = httpx.get(url, timeout=timeout)
+            response = httpx.get(url, headers=_DEFAULT_HEADERS, timeout=timeout)
             if response.status_code == httpx.codes.OK:
                 return response.text
+            if response.status_code not in (httpx.codes.TOO_MANY_REQUESTS, httpx.codes.SERVICE_UNAVAILABLE):
+                response.raise_for_status()
             last_exception = httpx.HTTPStatusError(
                 f"Unexpected status code {response.status_code}", request=response.request, response=response
             )
         except Exception as exc:  # noqa: BLE001 - we want to retry all errors
             last_exception = exc
-        time.sleep(1)
+        if attempt < max_retries:
+            time.sleep(backoff)
+            backoff *= 2
 
     if last_exception:
         raise last_exception

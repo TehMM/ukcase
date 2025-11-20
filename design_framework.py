@@ -11,6 +11,16 @@ If code diverges from that design, either:
 - Update the code to match the design, OR
 - Update docs/design_framework.md (and this file's comments) to reflect
   the new, agreed design.
+
+Scraping modules overview:
+- Atom feed utilities (app.scraping.feeds):
+  - build_atom_url_for_segment(segment): constructs the Atom feed URL based on Segment fields, using raw_atom_url override when provided. For now it supports query and courts; future enhancements will map additional advanced search fields to feed query parameters.
+  - fetch_atom_entries(segment): fetches the Atom feed using httpx with retry/backoff and parses it via feedparser into a list of AtomEntry objects.
+  - AtomEntry: dataclass with canonical_uri, link, title, updated, published, and a computed xml_url property that derives the XML download URL.
+
+- Rate limiting helpers (app.scraping.rate_limit):
+  - get_rate_limit_seconds(segment): returns segment.rate_limit_seconds when set, otherwise falls back to Settings.default_rate_limit_seconds.
+  - respect_rate_limit(segment): sleeps for the configured number of seconds. This will be called by higher-level scraping loops between HTTP requests to avoid hammering the UK National Archives.
 """
 
 DATABASE_SCHEMA = r"""

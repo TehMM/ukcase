@@ -47,6 +47,8 @@ except ImportError:  # pragma: no cover
 
     class Codes(SimpleNamespace):
         OK = 200
+        TOO_MANY_REQUESTS = 429
+        SERVICE_UNAVAILABLE = 503
 
     httpx.Response = Response
     httpx.HTTPStatusError = HTTPStatusError
@@ -141,7 +143,7 @@ def sample_atom_xml():
 
 
 def test_fetch_atom_entries_parses_sample(monkeypatch, sample_atom_xml):
-    def fake_get(url: str, timeout: int):
+    def fake_get(url: str, headers=None, timeout: int | None = None):
         return httpx.Response(status_code=200, text=sample_atom_xml)
 
     monkeypatch.setattr(feeds.httpx, "get", fake_get)
