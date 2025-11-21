@@ -551,6 +551,20 @@ Write a dedicated parser module, e.g. parsers/national_archives_xml.py, encapsul
 
 Parser must be unit-tested with sample XML fixtures.
 
+6.3 XML download, parsing, and persistence helpers
+
+- XML download (app.scraping.xml_download)
+  - download_xml_for_canonical_uri(canonical_uri): derives the XML URL, fetches it with retry/backoff on 429/5xx, and returns (xml_url, content). All requests send the configured User-Agent and respect request_timeout_seconds / max_http_retries.
+  - store_xml_to_disk(canonical_uri, xml_content): writes XML to xml_storage_root/{canonical_uri}/data.xml using atomic replace, creating directories as needed.
+
+- XML parsing (app.scraping.xml_parse)
+  - JudgmentMetadata dataclass captures neutral_citation, neutral_citation_number, court_code, decision_date, title, parties, and judge.
+  - parse_judgment_metadata_from_xml(xml_bytes): extracts mandatory metadata from LegalDocML XML and raises MetadataParseError when required fields are missing or invalid.
+
+- Judgment CRUD helpers (app.db.crud)
+  - get_judgment_by_canonical_uri(session, canonical_uri): convenience selector.
+  - create_judgment_from_metadata(session, canonical_uri, metadata, xml_path, first_seen_segment_id=None): inserts a new Judgment row with timestamps and default statuses.
+
 7. Triggers & Scheduling
 7.1 Manual Triggers
 

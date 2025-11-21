@@ -34,9 +34,10 @@ except ImportError:  # pragma: no cover
     httpx = types.ModuleType("httpx")
 
     class Response:
-        def __init__(self, status_code: int, text: str, request=None):
+        def __init__(self, status_code: int, text: str, request=None, content: bytes | None = None):
             self.status_code = status_code
             self.text = text
+            self.content = content if content is not None else text.encode()
             self.request = request
 
         def raise_for_status(self):
