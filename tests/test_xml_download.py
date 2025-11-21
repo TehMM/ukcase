@@ -87,6 +87,7 @@ if "sqlalchemy" not in sys.modules:  # pragma: no cover
 
 import httpx  # type: ignore  # noqa: E402
 
+# Test-only compatibility shim to ensure RequestError exists even when httpx isn't installed.
 if not hasattr(httpx, "RequestError"):
     class _RequestError(Exception):  # pragma: no cover - compatibility shim
         def __init__(self, message: str, request=None):
@@ -205,19 +206,12 @@ def test_download_xml_raises_on_not_found(monkeypatch):
 def test_download_xml_raises_after_request_errors(monkeypatch):
     sleep_calls: list[float] = []
 
+    settings = xml_download.get_settings()
+    settings.max_http_retries = 3
+
     def fake_get(url: str, timeout: int, headers: dict):
         raise httpx.RequestError("network down")
 
-    monkeypatch.setattr(
-        xml_download,
-        "get_settings",
-        lambda: SimpleNamespace(
-            request_timeout_seconds=5,
-            max_http_retries=3,
-            http_user_agent="ukcase-tests/0.1",
-            xml_storage_root=pathlib.Path.cwd(),
-        ),
-    )
     monkeypatch.setattr(xml_download.httpx, "get", fake_get)
     monkeypatch.setattr(xml_download.time, "sleep", lambda seconds: sleep_calls.append(seconds))
 

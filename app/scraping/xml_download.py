@@ -17,9 +17,12 @@ logger = logging.getLogger(__name__)
 def download_xml_for_canonical_uri(canonical_uri: str) -> Tuple[str, bytes]:
     """Download the XML for a canonical URI with retry and backoff.
 
-    Retries are performed only for HTTP 429 and 5xx responses or network-level
-    errors raised by httpx. Other 4xx responses raise immediately without
-    retry.
+    Retries are performed only for:
+    - HTTP 429 responses
+    - HTTP 5xx responses
+    - network-level exceptions raised by httpx
+
+    Other 4xx responses raise immediately without retry.
     """
 
     settings = get_settings()
@@ -34,17 +37,20 @@ def download_xml_for_canonical_uri(canonical_uri: str) -> Tuple[str, bytes]:
             response = httpx.get(
                 xml_url,
                 timeout=timeout,
-                headers={"User-Agent": settings.http_user_agent},
+                headers={
+                    "User-Agent": settings.http_user_agent,
+                    "Accept": "application/xml, text/xml;q=0.9, */*;q=0.8",
+                },
             )
-            status = response.status_code
+            status_code = response.status_code
 
-            if status == httpx.codes.OK:
+            if status_code == httpx.codes.OK:
                 logger.debug("Fetched XML for %s", canonical_uri)
                 return xml_url, response.content
 
-            if status == getattr(httpx.codes, "TOO_MANY_REQUESTS", 429) or 500 <= status < 600:
+            if status_code == getattr(httpx.codes, "TOO_MANY_REQUESTS", 429) or 500 <= status_code < 600:
                 last_exception = httpx.HTTPStatusError(
-                    f"Unexpected status code {status}",
+                    f"Unexpected status code {status_code}",
                     request=response.request,
                     response=response,
                 )
