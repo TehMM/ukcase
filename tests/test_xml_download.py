@@ -128,6 +128,7 @@ def test_download_xml_success(monkeypatch):
     assert len(calls) == 1
     for _, headers in calls:
         assert headers["User-Agent"] == "ukcase-tests/0.1"
+        assert headers["Accept"] == "application/xml, text/xml;q=0.9, */*;q=0.8"
     assert sleep_calls == []
 
 
@@ -152,6 +153,7 @@ def test_download_xml_retries_then_succeeds(monkeypatch):
     assert len(sleep_calls) == 1
     for _, headers in calls:
         assert headers["User-Agent"] == "ukcase-tests/0.1"
+        assert headers["Accept"] == "application/xml, text/xml;q=0.9, */*;q=0.8"
 
 
 def test_download_xml_retries_on_too_many_requests(monkeypatch):
@@ -186,6 +188,7 @@ def test_download_xml_retries_on_too_many_requests(monkeypatch):
     assert sleep_calls == [0.5, 1.0]
     for _, headers in calls:
         assert headers["User-Agent"] == "ukcase-tests/0.1"
+        assert headers["Accept"] == "application/xml, text/xml;q=0.9, */*;q=0.8"
 
 
 def test_download_xml_raises_on_not_found(monkeypatch):
