@@ -551,6 +551,20 @@ Write a dedicated parser module, e.g. parsers/national_archives_xml.py, encapsul
 
 Parser must be unit-tested with sample XML fixtures.
 
+6.3 XML download, parsing, and persistence helpers
+
+- XML download (app.scraping.xml_download)
+  - download_xml_for_canonical_uri(canonical_uri): derives the XML URL, fetches it with retry/backoff on HTTP 429, HTTP 5xx, or network-level errors, and returns (xml_url, content). Other 4xx responses raise immediately without retry. All requests send the configured User-Agent and `Accept: application/xml, text/xml;q=0.9, */*;q=0.8` and respect request_timeout_seconds / max_http_retries. “Case ID” is currently the canonical_uri from the Atom feed; we may later parse an explicit XML identifier into JudgmentMetadata once the LegalDocML headers are confirmed.
+  - store_xml_to_disk(canonical_uri, xml_content): normalises canonical_uri (no query/fragment, rejects traversal) and writes XML to xml_storage_root / canonical_uri / "data.xml" using atomic replace. xml_storage_root is a Path.
+
+- XML parsing (app.scraping.xml_parse)
+  - JudgmentMetadata dataclass captures neutral_citation, neutral_citation_number, court_code, decision_date, title, parties, and judge.
+  - parse_judgment_metadata_from_xml(xml_bytes): extracts mandatory metadata from LegalDocML XML and raises MetadataParseError when required fields are missing or invalid.
+
+- Judgment CRUD helpers (app.db.crud)
+  - get_judgment_by_canonical_uri(session, canonical_uri): convenience selector.
+  - create_judgment_from_metadata(session, canonical_uri, metadata, xml_path, first_seen_segment_id=None): inserts a new Judgment row with timestamps and default statuses.
+
 7. Triggers & Scheduling
 7.1 Manual Triggers
 

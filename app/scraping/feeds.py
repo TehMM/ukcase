@@ -1,7 +1,6 @@
 """Atom feed construction and parsing utilities."""
 from __future__ import annotations
 
-import random
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -20,10 +19,6 @@ else:  # pragma: no cover - runtime fallback when ORM dependencies are unavailab
 
 BASE_ATOM_URL = "https://caselaw.nationalarchives.gov.uk/atom.xml"
 BASE_CANONICAL_PREFIX = "https://caselaw.nationalarchives.gov.uk"
-
-_DEFAULT_HEADERS = {
-    "Accept": "application/atom+xml, application/xml;q=0.9, */*;q=0.8",
-}
 
 
 @dataclass
@@ -83,7 +78,12 @@ def derive_xml_url(canonical_uri: str) -> str:
 
 
 def _parse_datetime(value: Optional[time.struct_time]) -> Optional[datetime]:
-    """Convert a feedparser time.struct_time into a naive datetime interpreted as UTC."""
+    """Convert a feedparser time.struct_time into a naive datetime.
+
+    We reconstruct the datetime directly from the struct fields to avoid
+    local timezone conversion via time.mktime(), which can introduce
+    timezone-dependent offsets.
+    """
 
     if value is None:
         return None
@@ -98,17 +98,15 @@ def _parse_datetime(value: Optional[time.struct_time]) -> Optional[datetime]:
 
 
 def _fetch_atom_feed(url: str) -> str:
-    """Fetch Atom feed text with retry/backoff and polite headers.
+    """Fetch an Atom feed from the given URL with simple retry behaviour.
 
-    Retries are attempted for 429 and 5xx responses, with a capped linear
-    backoff plus small jitter. Client errors outside this set raise
-    immediately.
+    Retries are only performed for HTTP 429 and 5xx responses, or for
+    network-level errors raised by httpx. Other 4xx responses raise
+    immediately without retry.
     """
     settings = get_settings()
     timeout = settings.request_timeout_seconds
     max_retries = settings.max_http_retries
-
-    retryable_statuses = (httpx.codes.TOO_MANY_REQUESTS, httpx.codes.SERVICE_UNAVAILABLE)
     last_exception: Optional[Exception] = None
 
     for attempt in range(1, max_retries + 1):
@@ -116,32 +114,36 @@ def _fetch_atom_feed(url: str) -> str:
             response = httpx.get(
                 url,
                 timeout=timeout,
-                headers={"User-Agent": settings.http_user_agent, **_DEFAULT_HEADERS},
+                headers={"User-Agent": settings.http_user_agent},
             )
             status = response.status_code
+
             if status == httpx.codes.OK:
                 return response.text
 
-            if status in retryable_statuses or 500 <= status < 600:
+            # Retry on "Too Many Requests" and 5xx responses.
+            if status == getattr(httpx.codes, "TOO_MANY_REQUESTS", 429) or 500 <= status < 600:
                 last_exception = httpx.HTTPStatusError(
                     f"Unexpected status code {status}",
                     request=response.request,
                     response=response,
                 )
             else:
+                # Non-retryable client error: raise immediately.
                 response.raise_for_status()
-        except httpx.HTTPStatusError as exc:  # noqa: BLE001 - handled below
+        except httpx.HTTPStatusError as exc:  # noqa: BLE001 - controlled re-raise for client errors
             status_code = getattr(exc.response, "status_code", None)
-            if status_code not in retryable_statuses and not (status_code and 500 <= status_code < 600):
+            if status_code is not None and status_code < 500 and status_code != getattr(httpx.codes, "TOO_MANY_REQUESTS", 429):
                 raise
             last_exception = exc
-        except Exception as exc:  # noqa: BLE001 - we want to retry all other errors
+        except Exception as exc:  # noqa: BLE001 - we deliberately capture all other errors to retry
             last_exception = exc
 
-        sleep_for = min(5.0, 0.5 * attempt) + random.uniform(0.0, 0.25)
+        # Lightweight backoff between retry attempts.
+        sleep_for = min(5.0, 0.5 * attempt)
         time.sleep(sleep_for)
 
-    if last_exception:
+    if last_exception is not None:
         raise last_exception
     raise RuntimeError("Atom feed fetch failed without an exception")
 
