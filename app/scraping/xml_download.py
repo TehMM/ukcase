@@ -49,17 +49,15 @@ def download_xml_for_canonical_uri(canonical_uri: str) -> Tuple[str, bytes]:
                     request=response.request,
                     response=response,
                 )
-                logger.debug("Retryable status %s for %s", status, canonical_uri)
             else:
                 response.raise_for_status()
 
         except httpx.HTTPStatusError as exc:  # noqa: BLE001 - propagate non-retryable client errors
             status_code = getattr(exc.response, "status_code", None)
             if status_code is not None and status_code < 500 and status_code != getattr(httpx.codes, "TOO_MANY_REQUESTS", 429):
-                logger.debug("Non-retryable status %s for %s", status_code, canonical_uri)
                 raise
             last_exception = exc
-            logger.warning("Retrying %s due to HTTP error: %s", canonical_uri, exc)
+            logger.warning("Retrying %s due to error: %s", canonical_uri, exc)
         except Exception as exc:  # noqa: BLE001 - deliberate catch-all for retryable failures
             last_exception = exc
             logger.warning("Retrying %s due to error: %s", canonical_uri, exc)

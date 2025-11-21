@@ -51,6 +51,11 @@ except ImportError:  # pragma: no cover
             self.request = request
             self.response = response
 
+    class RequestError(Exception):
+        def __init__(self, message: str, request=None):  # pragma: no cover - minimal stub
+            super().__init__(message)
+            self.request = request
+
     class Codes(SimpleNamespace):
         OK = 200
         TOO_MANY_REQUESTS = 429
@@ -59,6 +64,7 @@ except ImportError:  # pragma: no cover
 
     httpx.Response = Response
     httpx.HTTPStatusError = HTTPStatusError
+    httpx.RequestError = RequestError
     httpx.codes = Codes()
 
     def _missing_get(*args, **kwargs):  # pragma: no cover - replaced in tests
@@ -80,6 +86,14 @@ if "sqlalchemy" not in sys.modules:  # pragma: no cover
     sys.modules["sqlalchemy.orm"] = sqlalchemy.orm
 
 import httpx  # type: ignore  # noqa: E402
+
+if not hasattr(httpx, "RequestError"):
+    class _RequestError(Exception):  # pragma: no cover - compatibility shim
+        def __init__(self, message: str, request=None):
+            super().__init__(message)
+            self.request = request
+
+    httpx.RequestError = _RequestError  # type: ignore[attr-defined]
 
 from app.scraping import xml_download  # noqa: E402
 
@@ -188,19 +202,29 @@ def test_download_xml_raises_on_not_found(monkeypatch):
     assert sleep_calls == []
 
 
-def test_download_xml_raises_after_network_errors(monkeypatch):
+def test_download_xml_raises_after_request_errors(monkeypatch):
     sleep_calls: list[float] = []
 
     def fake_get(url: str, timeout: int, headers: dict):
-        raise RuntimeError("network down")
+        raise httpx.RequestError("network down")
 
+    monkeypatch.setattr(
+        xml_download,
+        "get_settings",
+        lambda: SimpleNamespace(
+            request_timeout_seconds=5,
+            max_http_retries=3,
+            http_user_agent="ukcase-tests/0.1",
+            xml_storage_root=pathlib.Path.cwd(),
+        ),
+    )
     monkeypatch.setattr(xml_download.httpx, "get", fake_get)
     monkeypatch.setattr(xml_download.time, "sleep", lambda seconds: sleep_calls.append(seconds))
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(httpx.RequestError):
         xml_download.download_xml_for_canonical_uri("/ewhc/comm/2021/999")
 
-    assert sleep_calls == [0.5]
+    assert sleep_calls == [0.5, 1.0]
 
 
 def test_store_xml_to_disk_writes_structure(tmp_path, monkeypatch):
