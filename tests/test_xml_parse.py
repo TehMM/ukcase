@@ -63,3 +63,60 @@ def test_parse_judgment_metadata_requires_neutral_citation():
 
     with pytest.raises(MetadataParseError):
         parse_judgment_metadata_from_xml(xml_without_citation)
+
+
+def test_parse_handles_namespaces_and_text_elements():
+    xml = b"""
+    <akomaNtoso xmlns:n="http://example.com">
+      <n:judgment>
+        <n:meta>
+          <n:identification>
+            <n:FRBRWork>
+              <n:FRBRdate date="2024-01-02" />
+              <n:neutralCitation>[2024] EWCA 12</n:neutralCitation>
+            </n:FRBRWork>
+          </n:identification>
+        </n:meta>
+        <n:header>
+          <n:case>
+            <n:courtCode>ewca/civ</n:courtCode>
+            <n:judges>
+              <n:judge>Example Judge</n:judge>
+            </n:judges>
+          </n:case>
+          <n:title>Example v Sample</n:title>
+        </n:header>
+      </n:judgment>
+    </akomaNtoso>
+    """
+
+    metadata = parse_judgment_metadata_from_xml(xml)
+
+    assert metadata.neutral_citation == "[2024] EWCA 12"
+    assert metadata.neutral_citation_number == 12
+    assert metadata.court_code == "ewca/civ"
+    assert metadata.decision_date == date(2024, 1, 2)
+    assert metadata.title == "Example v Sample"
+    assert metadata.parties is None
+    assert metadata.judge == "Example Judge"
+
+
+def test_parse_requires_decision_date():
+    xml_without_date = SAMPLE_XML.replace(b"<FRBRdate date=\"2025-03-15\" />", b"")
+
+    with pytest.raises(MetadataParseError):
+        parse_judgment_metadata_from_xml(xml_without_date)
+
+
+def test_parse_requires_title():
+    xml_without_title = SAMPLE_XML.replace(b"<title>ACME v Smith</title>", b"")
+
+    with pytest.raises(MetadataParseError):
+        parse_judgment_metadata_from_xml(xml_without_title)
+
+
+def test_parse_rejects_invalid_date_format():
+    bad_date_xml = SAMPLE_XML.replace(b"2025-03-15", b"15-03-2025")
+
+    with pytest.raises(MetadataParseError):
+        parse_judgment_metadata_from_xml(bad_date_xml)

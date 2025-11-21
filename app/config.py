@@ -1,4 +1,6 @@
 from functools import lru_cache
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,7 +29,7 @@ class Settings(BaseSettings):
     max_http_retries: int = 4
 
     http_user_agent: str = "ukcase-scraper/0.1 (+contact: CHANGE_ME)"
-    xml_storage_root: str = "./data/xml"
+    xml_storage_root: Path = Path("./data/xml")
 
 
 @lru_cache(maxsize=1)

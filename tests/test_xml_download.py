@@ -90,7 +90,7 @@ def _mock_settings(monkeypatch, tmp_path):
         request_timeout_seconds=5,
         max_http_retries=2,
         http_user_agent="ukcase-tests/0.1",
-        xml_storage_root=str(tmp_path),
+        xml_storage_root=tmp_path,
     )
     monkeypatch.setattr(xml_download, "get_settings", lambda: fake_settings)
 
@@ -139,6 +139,40 @@ def test_download_xml_retries_then_succeeds(monkeypatch):
         assert headers["User-Agent"] == "ukcase-tests/0.1"
 
 
+def test_download_xml_retries_on_too_many_requests(monkeypatch):
+    calls = []
+    sleep_calls: list[float] = []
+
+    monkeypatch.setattr(
+        xml_download,
+        "get_settings",
+        lambda: SimpleNamespace(
+            request_timeout_seconds=5,
+            max_http_retries=3,
+            http_user_agent="ukcase-tests/0.1",
+            xml_storage_root=pathlib.Path.cwd(),
+        ),
+    )
+
+    def fake_get(url: str, timeout: int, headers: dict):
+        calls.append((url, headers))
+        if len(calls) <= 2:
+            return httpx.Response(status_code=429, text="slow down")
+        return httpx.Response(status_code=200, text="<xml />", content=b"<xml />")
+
+    monkeypatch.setattr(xml_download.httpx, "get", fake_get)
+    monkeypatch.setattr(xml_download.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    xml_url, content = xml_download.download_xml_for_canonical_uri("/ewhc/adm/2023/50")
+
+    assert xml_url.endswith("/ewhc/adm/2023/50/data.xml")
+    assert content == b"<xml />"
+    assert len(calls) == 3
+    assert sleep_calls == [0.5, 1.0]
+    for _, headers in calls:
+        assert headers["User-Agent"] == "ukcase-tests/0.1"
+
+
 def test_download_xml_raises_on_not_found(monkeypatch):
     sleep_calls: list[float] = []
 
@@ -154,10 +188,25 @@ def test_download_xml_raises_on_not_found(monkeypatch):
     assert sleep_calls == []
 
 
-def test_store_xml_to_disk_writes_structure(tmp_path, monkeypatch):
-    monkeypatch.setattr(xml_download, "get_settings", lambda: SimpleNamespace(xml_storage_root=str(tmp_path)))
+def test_download_xml_raises_after_network_errors(monkeypatch):
+    sleep_calls: list[float] = []
 
-    path = xml_download.store_xml_to_disk("/ewhc/comm/2025/3036", b"<data />")
+    def fake_get(url: str, timeout: int, headers: dict):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(xml_download.httpx, "get", fake_get)
+    monkeypatch.setattr(xml_download.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    with pytest.raises(RuntimeError):
+        xml_download.download_xml_for_canonical_uri("/ewhc/comm/2021/999")
+
+    assert sleep_calls == [0.5]
+
+
+def test_store_xml_to_disk_writes_structure(tmp_path, monkeypatch):
+    monkeypatch.setattr(xml_download, "get_settings", lambda: SimpleNamespace(xml_storage_root=tmp_path))
+
+    path = xml_download.store_xml_to_disk("/ewhc/comm/2025/3036?foo=bar#frag", b"<data />")
 
     expected_dir = tmp_path / "ewhc" / "comm" / "2025" / "3036"
     assert expected_dir.is_dir()
@@ -166,3 +215,10 @@ def test_store_xml_to_disk_writes_structure(tmp_path, monkeypatch):
     assert expected_file.exists()
     assert expected_file.read_bytes() == b"<data />"
     assert path == os.fspath(expected_file)
+
+
+def test_store_xml_to_disk_rejects_traversal(tmp_path, monkeypatch):
+    monkeypatch.setattr(xml_download, "get_settings", lambda: SimpleNamespace(xml_storage_root=tmp_path))
+
+    with pytest.raises(ValueError):
+        xml_download.store_xml_to_disk("/../../etc/passwd", b"<data />")

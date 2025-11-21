@@ -554,8 +554,8 @@ Parser must be unit-tested with sample XML fixtures.
 6.3 XML download, parsing, and persistence helpers
 
 - XML download (app.scraping.xml_download)
-  - download_xml_for_canonical_uri(canonical_uri): derives the XML URL, fetches it with retry/backoff on 429/5xx, and returns (xml_url, content). All requests send the configured User-Agent and respect request_timeout_seconds / max_http_retries.
-  - store_xml_to_disk(canonical_uri, xml_content): writes XML to xml_storage_root/{canonical_uri}/data.xml using atomic replace, creating directories as needed.
+  - download_xml_for_canonical_uri(canonical_uri): derives the XML URL, fetches it with retry/backoff on 429/5xx, and returns (xml_url, content). All requests send the configured User-Agent and respect request_timeout_seconds / max_http_retries. “Case ID” is currently the canonical_uri from the Atom feed; we may later parse an explicit XML identifier into JudgmentMetadata once the LegalDocML headers are confirmed.
+  - store_xml_to_disk(canonical_uri, xml_content): normalises canonical_uri (no query/fragment, rejects traversal) and writes XML to xml_storage_root / canonical_uri / "data.xml" using atomic replace. xml_storage_root is a Path.
 
 - XML parsing (app.scraping.xml_parse)
   - JudgmentMetadata dataclass captures neutral_citation, neutral_citation_number, court_code, decision_date, title, parties, and judge.

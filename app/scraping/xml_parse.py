@@ -13,6 +13,7 @@ class MetadataParseError(Exception):
 
 @dataclass
 class JudgmentMetadata:
+    # TODO: Consider adding case_id when LegalDocML headers are confirmed.
     neutral_citation: str
     neutral_citation_number: Optional[int]
     court_code: str
