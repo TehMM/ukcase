@@ -2,8 +2,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 import os
 import sys
-import types
+import textwrap
 import time
+import types
+import xml.etree.ElementTree as ET
 
 import pytest
 
@@ -224,47 +226,65 @@ if "sqlalchemy" not in sys.modules:  # pragma: no cover
     sys.modules["sqlalchemy.dialects.postgresql"] = postgres
 
 
-# Provide a tiny feedparser stub when the dependency is missing.
+# Provide a lightweight feedparser stub for tests (always overrides the real
+# library if it has not been imported yet). This avoids a hard dependency on
+# feedparser and keeps tests hermetic.
 if "feedparser" not in sys.modules:  # pragma: no cover
     feedparser = types.ModuleType("feedparser")
 
-    def _empty_parse(*args, **kwargs):
-        text = args[0] if args else ""
-        link = None
-        if isinstance(text, str):
-            marker = 'href="'
-            if marker in text:
-                link = text.split(marker, 1)[1].split('"', 1)[0]
-        title = None
-        if isinstance(text, str) and "<title>" in text:
-            title_parts = text.split("<title>")[1:]
-            if title_parts:
-                title = title_parts[-1].split("</title>", 1)[0].strip()
-        entry = {"link": link}
-        if title:
-            entry["title"] = title
-        if isinstance(text, str) and "<updated>" in text:
-            updated_value = text.split("<updated>", 1)[1].split("</updated>", 1)[0].replace("Z", "")
+    def _parse_feed(text: str = "", **_: object):
+        entries: list[dict[str, object]] = []
+        if not isinstance(text, str):
+            return types.SimpleNamespace(entries=entries, bozo=False)
+
+        content = textwrap.dedent(text).strip()
+        if not content:
+            return types.SimpleNamespace(entries=entries, bozo=False)
+
+        try:
+            root = ET.fromstring(content)
+        except ET.ParseError:
+            return types.SimpleNamespace(entries=entries, bozo=False)
+
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+
+        def _parse_time(element: ET.Element | None) -> time.struct_time | None:
+            if element is None or not element.text:
+                return None
             try:
-                dt = datetime.fromisoformat(updated_value)
-                entry["updated_parsed"] = time.struct_time(
-                    (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, 0, 0, -1)
-                )
+                dt = datetime.fromisoformat(element.text.replace("Z", ""))
             except Exception:
-                pass
-        if isinstance(text, str) and "<published>" in text:
-            published_value = text.split("<published>", 1)[1].split("</published>", 1)[0].replace("Z", "")
-            try:
-                dt = datetime.fromisoformat(published_value)
-                entry["published_parsed"] = time.struct_time(
-                    (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, 0, 0, -1)
-                )
-            except Exception:
-                pass
-        entries = [entry] if link else []
+                return None
+            return dt.timetuple()
+
+        for entry_el in root.findall("atom:entry", ns):
+            entry: dict[str, object] = {}
+
+            id_el = entry_el.find("atom:id", ns)
+            if id_el is not None:
+                entry["id"] = id_el.text
+
+            link_el = entry_el.find("atom:link", ns)
+            if link_el is not None:
+                entry["link"] = link_el.attrib.get("href")
+
+            title_el = entry_el.find("atom:title", ns)
+            if title_el is not None:
+                entry["title"] = title_el.text
+
+            updated = _parse_time(entry_el.find("atom:updated", ns))
+            if updated:
+                entry["updated_parsed"] = updated
+
+            published = _parse_time(entry_el.find("atom:published", ns))
+            if published:
+                entry["published_parsed"] = published
+
+            entries.append(entry)
+
         return types.SimpleNamespace(entries=entries, bozo=False)
 
-    feedparser.parse = _empty_parse
+    feedparser.parse = _parse_feed
     sys.modules["feedparser"] = feedparser
 
 
