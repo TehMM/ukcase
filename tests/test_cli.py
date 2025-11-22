@@ -77,7 +77,7 @@ def test_segment_create_and_duplicate():
 def test_segment_create_rejects_bad_date_and_backfill():
     bad_date = runner.invoke(app, ["segment", "create", "delta", "--decision-date-from", "2020-99-99"])
 
-    assert bad_date.exit_code != 0
+    assert bad_date.exit_code == 2
     assert "Invalid date format" in bad_date.stdout
 
     invalid_backfill = runner.invoke(
@@ -91,7 +91,7 @@ def test_segment_create_rejects_bad_date_and_backfill():
         ],
     )
 
-    assert invalid_backfill.exit_code != 0
+    assert invalid_backfill.exit_code == 2
     assert "Allowed values" in invalid_backfill.stdout
 
 
