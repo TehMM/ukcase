@@ -111,22 +111,23 @@ CREATE INDEX idx_judgments_court_code_decision_date ON judgments (court_code, de
 CREATE INDEX idx_judgments_rag_status ON judgments (rag_status);
 
 
--- 3. Runs: each execution of a scraping job for a given segment
 CREATE TABLE runs (
     id                  BIGSERIAL PRIMARY KEY,
     segment_id          INTEGER NOT NULL REFERENCES segments(id),
 
-    trigger_type        TEXT NOT NULL,
+    trigger_type        TEXT NOT NULL DEFAULT 'UNKNOWN',
     -- 'MANUAL', 'WEBHOOK', 'SCHEDULED', etc.
+    run_type            TEXT NOT NULL,
+    -- 'BACKFILL' or 'INCREMENTAL'
 
     started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     finished_at         TIMESTAMPTZ,
     status              TEXT NOT NULL DEFAULT 'RUNNING',
     -- 'RUNNING', 'SUCCESS', 'PARTIAL_SUCCESS', 'FAILED', 'CANCELLED'
 
-    total_items         INTEGER DEFAULT 0,
-    new_items           INTEGER DEFAULT 0,
-    skipped_items       INTEGER DEFAULT 0,
+    total_entries       INTEGER DEFAULT 0,
+    new_judgments       INTEGER DEFAULT 0,
+    skipped_existing    INTEGER DEFAULT 0,
     failed_items        INTEGER DEFAULT 0,
 
     -- For debugging / audit
@@ -148,13 +149,16 @@ CREATE TABLE run_items (
     -- canonical_uri duplicates judgments.canonical_uri to allow run logging
     -- even when the judgment insert fails
 
-    action              TEXT NOT NULL,
-    -- 'CREATED', 'UPDATED', 'SKIPPED_ALREADY_EXISTS', 'FAILED_DOWNLOAD', 'FAILED_PARSE'
+    xml_url             TEXT,
+    xml_path            TEXT,
 
-    status              TEXT NOT NULL DEFAULT 'SUCCESS',
-    -- 'SUCCESS', 'FAILED'
+    status              TEXT NOT NULL DEFAULT 'PENDING',
+    -- 'PENDING', 'SUCCESS', 'FAILED', 'SKIPPED_EXISTING'
 
     error_message       TEXT,
+
+    started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at         TIMESTAMPTZ,
 
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

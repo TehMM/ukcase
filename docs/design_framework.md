@@ -268,17 +268,19 @@ CREATE TABLE runs (
     id                  BIGSERIAL PRIMARY KEY,
     segment_id          INTEGER NOT NULL REFERENCES segments(id),
 
-    trigger_type        TEXT NOT NULL,
+    trigger_type        TEXT NOT NULL DEFAULT 'UNKNOWN',
     -- 'MANUAL', 'WEBHOOK', 'SCHEDULED', etc.
+    run_type            TEXT NOT NULL,
+    -- 'BACKFILL' or 'INCREMENTAL'
 
     started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     finished_at         TIMESTAMPTZ,
     status              TEXT NOT NULL DEFAULT 'RUNNING',
     -- 'RUNNING', 'SUCCESS', 'PARTIAL_SUCCESS', 'FAILED', 'CANCELLED'
 
-    total_items         INTEGER DEFAULT 0,
-    new_items           INTEGER DEFAULT 0,
-    skipped_items       INTEGER DEFAULT 0,
+    total_entries       INTEGER DEFAULT 0,
+    new_judgments       INTEGER DEFAULT 0,
+    skipped_existing    INTEGER DEFAULT 0,
     failed_items        INTEGER DEFAULT 0,
 
     -- For debugging / audit
@@ -300,13 +302,16 @@ CREATE TABLE run_items (
     -- canonical_uri duplicates judgments.canonical_uri to allow run logging
     -- even when the judgment insert fails
 
-    action              TEXT NOT NULL,
-    -- 'CREATED', 'UPDATED', 'SKIPPED_ALREADY_EXISTS', 'FAILED_DOWNLOAD', 'FAILED_PARSE'
+    xml_url             TEXT,
+    xml_path            TEXT,
 
-    status              TEXT NOT NULL DEFAULT 'SUCCESS',
-    -- 'SUCCESS', 'FAILED'
+    status              TEXT NOT NULL DEFAULT 'PENDING',
+    -- 'PENDING', 'SUCCESS', 'FAILED', 'SKIPPED_EXISTING'
 
     error_message       TEXT,
+
+    started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at         TIMESTAMPTZ,
 
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -316,6 +321,30 @@ CREATE INDEX idx_run_items_canonical_uri ON run_items (canonical_uri);
 
 
 NOTE: Any time we change the schema (add column, change meaning, add enum value), update this DDL and comment the version change.
+
+7. Segment scraping pipeline
+
+The segment-level orchestrator lives in `app/scraping/pipeline.py` and exposes two public entrypoints:
+
+- `run_backfill_for_segment(segment_id: int, max_entries: Optional[int] = None)`
+- `run_incremental_for_segment(segment_id: int)`
+
+Both delegate to `run_segment`, which:
+
+- Loads the `Segment` by id and creates a `Run` row immediately (status `RUNNING`, counters zeroed, `run_type` set to `BACKFILL` or `INCREMENTAL`).
+- Fetches Atom entries via `build_atom_url_for_segment` and `fetch_atom_entries`.
+- Filters entries:
+  - Backfill: processes every entry in the feed (optionally capped by `max_entries`).
+  - Incremental: processes only entries whose `canonical_uri` is not already in `Judgment`.
+- Iterates entries with per-entry durability (commit after each item) and rate-limits via `respect_rate_limit` before HTTP calls.
+- For each entry:
+  - If the `canonical_uri` is invalid, record a failed `RunItem` and continue.
+  - If a `Judgment` already exists, record a `RunItem` with status `SKIPPED_EXISTING` and increment `skipped_existing`.
+  - Otherwise: download XML (`download_xml_for_canonical_uri`), persist it (`store_xml_to_disk`), parse metadata (`parse_judgment_metadata_from_xml`), create a `Judgment`, and mark the `RunItem` `SUCCESS`.
+  - Parse errors (`MetadataParseError`) or other exceptions are captured on the `RunItem` (status `FAILED`, truncated `error_message`) while allowing the run to continue.
+- When all entries are processed, mark the `Run` `SUCCESS`; any outer exception marks the `Run` `FAILED` and preserves the error message.
+
+Current incremental semantics: “new” means there is no existing `Judgment` row with the same `canonical_uri`. Future iterations may refine this using timestamps or last successful run markers.
 
 4. Configuration & Environment
 4.1 Environment Variables

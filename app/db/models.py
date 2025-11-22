@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+import enum
 from decimal import Decimal
 from typing import List, Optional
 
@@ -9,6 +10,11 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+
+class RunType(str, enum.Enum):
+    BACKFILL = "BACKFILL"
+    INCREMENTAL = "INCREMENTAL"
 
 
 class Segment(Base):
@@ -102,16 +108,17 @@ class Run(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     segment_id: Mapped[int] = mapped_column(Integer, ForeignKey("segments.id"), nullable=False)
 
-    trigger_type: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger_type: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'UNKNOWN'"))
+    run_type: Mapped[str] = mapped_column(Text, nullable=False)
 
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'RUNNING'"))
 
-    total_items: Mapped[Optional[int]] = mapped_column(Integer, server_default=text("0"))
-    new_items: Mapped[Optional[int]] = mapped_column(Integer, server_default=text("0"))
-    skipped_items: Mapped[Optional[int]] = mapped_column(Integer, server_default=text("0"))
-    failed_items: Mapped[Optional[int]] = mapped_column(Integer, server_default=text("0"))
+    total_entries: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    new_judgments: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    skipped_existing: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    failed_items: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
     error_message: Mapped[Optional[str]] = mapped_column(Text)
 
@@ -138,9 +145,14 @@ class RunItem(Base):
     judgment_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("judgments.id"))
     canonical_uri: Mapped[str] = mapped_column(Text, nullable=False)
 
-    action: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'SUCCESS'"))
+    xml_url: Mapped[Optional[str]] = mapped_column(Text)
+    xml_path: Mapped[Optional[str]] = mapped_column(Text)
+
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'PENDING'"))
     error_message: Mapped[Optional[str]] = mapped_column(Text)
+
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
