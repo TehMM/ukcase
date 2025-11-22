@@ -14,7 +14,9 @@ If code diverges from that design, either:
 
 Scraping modules overview:
 - Atom feed utilities (app.scraping.feeds):
-  - build_atom_url_for_segment(segment): constructs the Atom feed URL based on Segment fields, using raw_atom_url override when provided. For now it supports query and courts; future enhancements will map additional advanced search fields to feed query parameters.
+  - build_atom_url_for_segment(segment): constructs the Atom feed URL based on Segment fields (query, courts, decision_date_from, decision_date_to).
+    The decision_date_* parameter names reflect the current understanding of the
+    TNA Atom API and should be updated if upstream naming differs.
   - fetch_atom_entries(segment): fetches the Atom feed using httpx with retry/backoff and parses it via feedparser into a list of AtomEntry objects.
   - AtomEntry: dataclass with canonical_uri, link, title, updated, published, and a computed xml_url property that derives the XML download URL.
 
@@ -39,37 +41,21 @@ CREATE TABLE segments (
     name                TEXT NOT NULL UNIQUE,
     description         TEXT,
 
-    -- Mirrors advanced search fields; keep nullable as they are optional
-    query               TEXT,           -- main keyword/text query
-    courts              TEXT[],         -- e.g. ['ewhc/ch', 'ewhc/comm']
-    -- Additional advanced search fields for future use:
-    party               TEXT,
-    judge_filter        TEXT,
-    neutral_citation_filter TEXT,
-    date_from           DATE,
-    date_to             DATE,
+    query               TEXT,
+    courts              TEXT[],
+    decision_date_from  DATE,
+    decision_date_to    DATE,
 
-    -- Raw Atom URL override (if provided, we ignore the above fields for feed construction)
-    raw_atom_url        TEXT,
-
-    -- Backfill behaviour: 'NEW_ONLY', 'FULL', 'SINCE_DATE'
     backfill_mode       TEXT NOT NULL DEFAULT 'NEW_ONLY',
-    backfill_since_date DATE,          -- only used when backfill_mode = 'SINCE_DATE'
+    rate_limit_seconds  NUMERIC(6, 2) NOT NULL DEFAULT 1.5,
 
-    -- Rate limiting: seconds between requests (per segment override)
-    rate_limit_seconds  NUMERIC(6, 2) DEFAULT 1.5, -- default ~1 request / 1.5s
-
-    -- ChangeDetection.io integration
-    changedetection_token TEXT UNIQUE, -- token segment mapping for webhook
-
-    active              BOOLEAN NOT NULL DEFAULT TRUE,
+    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
 
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_segments_active ON segments (active);
-CREATE INDEX idx_segments_changedetection_token ON segments (changedetection_token);
+CREATE INDEX idx_segments_active ON segments (is_active);
 
 
 -- 2. Judgments: canonical store of all judgments we know about

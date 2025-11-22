@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -35,5 +36,17 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return cached application settings."""
+    settings = Settings()
 
-    return Settings()
+    # When running with lightweight test stubs (no pydantic_settings.BaseSettings),
+    # attributes may be missing. Only populate missing fields from environment
+    # variables to mirror BaseSettings behaviour without overriding real values.
+    if not hasattr(settings, "database_url"):
+        settings.database_url = os.environ.get("UKCASE_DATABASE_URL", "sqlite+pysqlite:///")
+    if not hasattr(settings, "redis_url"):
+        settings.redis_url = os.environ.get("UKCASE_REDIS_URL", "redis://localhost:6379/0")
+    if not hasattr(settings, "admin_username"):
+        settings.admin_username = os.environ.get("UKCASE_ADMIN_USERNAME", "admin")
+    if not hasattr(settings, "admin_password"):
+        settings.admin_password = os.environ.get("UKCASE_ADMIN_PASSWORD", "password")
+    return settings

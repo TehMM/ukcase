@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.db import crud
 from app.db.base import SessionLocal
 from app.db.models import Judgment, Run, RunType, Segment
-from app.scraping.feeds import AtomEntry, build_atom_url_for_segment, fetch_atom_entries
+from app.scraping.feeds import AtomEntry, fetch_atom_entries
 from app.scraping.rate_limit import respect_rate_limit
 from app.scraping.xml_download import download_xml_for_canonical_uri, store_xml_to_disk
 from app.scraping.xml_parse import MetadataParseError, parse_judgment_metadata_from_xml
@@ -131,8 +131,7 @@ def run_segment(
         session.commit()
 
         try:
-            atom_url = build_atom_url_for_segment(segment)
-            entries = fetch_atom_entries(atom_url)
+            entries = fetch_atom_entries(segment)
             filtered_entries = filter_entries_for_run_type(session, run_type, entries)
 
             if run_type == RunType.INCREMENTAL:
