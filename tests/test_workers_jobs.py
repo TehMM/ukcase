@@ -16,6 +16,35 @@ class DummyResult:
         self.failed_items = 1
 
 
+def test_summary_normalises_enum_like_values(monkeypatch):
+    class FakeEnum:
+        def __init__(self, value: str):
+            self.value = value
+
+    class EnumLikeResult:
+        def __init__(self):
+            self.run = SimpleNamespace(
+                id=123,
+                run_type=FakeEnum("BACKFILL"),
+                status=FakeEnum("SUCCESS"),
+            )
+            self.total_entries = 1
+            self.new_judgments = 1
+            self.skipped_existing = 0
+            self.failed_items = 0
+
+    monkeypatch.setattr(
+        jobs.pipeline, "run_backfill_for_segment", lambda segment_id, max_entries=None: EnumLikeResult()
+    )
+
+    summary = jobs.backfill_segment(segment_id=10)
+
+    assert summary["run_id"] == 123
+    assert summary["segment_id"] == 10
+    assert summary["run_type"] == "BACKFILL"
+    assert summary["status"] == "SUCCESS"
+
+
 def test_backfill_segment_delegates_to_pipeline(monkeypatch):
     calls: dict[str, object] = {}
 

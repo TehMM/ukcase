@@ -36,6 +36,24 @@ def get_default_queue(queue_name: str = "ukcase") -> Queue:
     return Queue(name=queue_name, connection=connection)
 
 
+def _enum_like_to_str(value: object, default: str = "UNKNOWN") -> str:
+    """Normalise Enum-like values to a plain string.
+
+    Uses ``value`` when it exposes a ``.value`` attribute (e.g. Enum members),
+    falling back to ``str(value)``. Returns ``default`` when ``value`` is ``None``
+    or cannot be coerced.
+    """
+
+    if value is None:
+        return default
+
+    raw_value = getattr(value, "value", value)
+    try:
+        return str(raw_value)
+    except Exception:  # pragma: no cover - extremely defensive
+        return default
+
+
 def _summary_from_result(segment_id: int, result: pipeline.SegmentRunResult) -> SegmentRunSummary:
     """Build a serialisable summary from a SegmentRunResult."""
 
@@ -43,8 +61,8 @@ def _summary_from_result(segment_id: int, result: pipeline.SegmentRunResult) -> 
     return SegmentRunSummary(
         run_id=run.id,
         segment_id=segment_id,
-        run_type=str(getattr(run, "run_type", "UNKNOWN")),
-        status=str(getattr(run, "status", "UNKNOWN")),
+        run_type=_enum_like_to_str(getattr(run, "run_type", None)),
+        status=_enum_like_to_str(getattr(run, "status", None)),
         total_entries=result.total_entries,
         new_judgments=result.new_judgments,
         skipped_existing=result.skipped_existing,
