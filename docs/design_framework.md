@@ -652,11 +652,7 @@ Find segment by changedetection_token.
 
 Reject if not found / inactive.
 
-Acquire per-segment lock (Redis-based) to avoid concurrent runs.
-
-Enqueue incremental_segment_run(segment.id) with trigger_type=WEBHOOK.
-
-Respond 202 Accepted.
+Trigger pipeline.run_incremental_for_segment synchronously (current implementation) after validating the secret and confirming the segment exists. Return a JSON summary (run_id, segment_id, status, totals).
 
 7.5 Internal Scheduling
 
@@ -668,7 +664,7 @@ RQ scheduler / APScheduler in worker process.
 
 For each active segment:
 
-Periodic job enqueues incremental_segment_run respecting global and per-segment rate limits.
+Periodic job enqueues workers.jobs.incremental_segment_run via workers.jobs.enqueue_incremental_segment respecting global and per-segment rate limits. Admin UI and CLI continue to call the synchronous pipeline directly; queued execution is available for schedulers and future async triggers.
 
 8. Rate Limiting, Backoff & Ethics
 8.1 Defaults
@@ -958,8 +954,8 @@ app/
     rate_limit.py      # per-segment rate limiting helpers
 
   workers/
-    worker.py          # RQ worker entrypoint
-    jobs.py            # job functions (backfill_segment, incremental_segment_run)
+    worker.py          # RQ worker entrypoint (uses rq.Worker + Connection)
+    jobs.py            # RQ job wrappers (backfill_segment, incremental_segment_run) + enqueue helpers
 
   web/
     templates/         # Jinja2 templates

@@ -198,6 +198,49 @@ if "sqlalchemy" not in sys.modules:  # pragma: no cover
     def relationship(*args, **kwargs):
         return None
 
+# Provide lightweight stubs for redis/rq so tests can run without the optional
+# dependencies installed in the execution environment.
+if "redis" not in sys.modules:  # pragma: no cover
+    class FakeRedis:
+        def __init__(self, url: str | None = None):
+            self.url = url
+
+        @classmethod
+        def from_url(cls, url: str):
+            return cls(url)
+
+    sys.modules["redis"] = types.SimpleNamespace(Redis=FakeRedis)
+
+if "rq" not in sys.modules:  # pragma: no cover
+    class FakeQueue:
+        def __init__(self, name=None, connection=None):
+            self.name = name
+            self.connection = connection
+
+        def enqueue(self, *args, **kwargs):
+            raise NotImplementedError
+
+    class FakeWorker:
+        def __init__(self, queues):
+            self.queues = queues
+
+        def work(self):
+            raise NotImplementedError
+
+    class FakeConnection:
+        def __init__(self, connection=None):
+            self.connection = connection
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    sys.modules["rq"] = types.SimpleNamespace(
+        Queue=FakeQueue, Worker=FakeWorker, Connection=FakeConnection
+    )
+
     sa = types.ModuleType("sqlalchemy")
     sa.create_engine = create_engine
     sa.BigInteger = sa.Boolean = sa.Date = sa.DateTime = sa.Integer = sa.Numeric = sa.Text = FakeType

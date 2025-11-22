@@ -31,6 +31,10 @@ Scraping modules overview:
   - For each processed entry: invalid canonical_uri → FAILED RunItem; existing judgment → SKIPPED_EXISTING; otherwise download, store, parse, and create a Judgment then mark SUCCESS. Parse or other errors set RunItem FAILED and continue.
   - total_entries counts Atom entries handled in the run (including skipped and failed). Final status: SUCCESS if failed_items == 0; PARTIAL_SUCCESS if failures occurred alongside at least one new judgment; FAILED if failures occurred and no new judgments were created (outer errors also mark FAILED).
 
+- Background workers (app.workers.*):
+  - jobs: RQ job wrappers (backfill_segment, incremental_segment_run) that delegate to the synchronous pipeline and expose enqueue_* helpers that push jobs onto the default Redis-backed queue.
+  - worker: Worker entrypoint that uses rq.Worker + Connection against the configured Redis URL; intended to be exposed via the ukcase-worker console script.
+
 - Web application (app.web):
   - create_app() builds a FastAPI app with /healthz, admin routes, and webhook routes mounted.
   - Admin UI uses HTTP Basic auth (settings.admin_username/password) and Jinja2 templates (app/templates) with HTMX/Alpine for progressive enhancement.
