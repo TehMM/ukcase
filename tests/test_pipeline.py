@@ -253,6 +253,40 @@ def test_per_entry_failure_is_recorded(monkeypatch, db_session, segment, fake_me
     assert result.run.status == "PARTIAL_SUCCESS"
 
 
+def test_all_entries_fail_sets_run_status_failed(monkeypatch, db_session, segment, tmp_path):
+    entries = [make_entry("/case/fail1"), make_entry("/case/fail2")]
+
+    def metadata_factory(xml_bytes: bytes):
+        raise MetadataParseError("bad metadata")
+
+    def xml_path_factory(canonical_uri: str) -> str:
+        path = tmp_path / canonical_uri.strip("/") / "data.xml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("data")
+        return str(path)
+
+    stub_pipeline_dependencies(
+        monkeypatch,
+        entries=entries,
+        xml_path_factory=xml_path_factory,
+        metadata_factory=metadata_factory,
+    )
+
+    result = pipeline.run_backfill_for_segment(segment.id)
+
+    judgments = db_session.query(Judgment).all()
+    assert len(judgments) == 0
+    assert result.new_judgments == 0
+    assert result.failed_items == 2
+    assert result.skipped_existing == 0
+    assert result.total_entries == 2
+    assert result.run.status == "FAILED"
+
+    run_items = db_session.query(RunItem).order_by(RunItem.canonical_uri).all()
+    assert [item.status for item in run_items] == ["FAILED", "FAILED"]
+    assert all(item.error_message for item in run_items)
+
+
 def test_run_failure_records_status(monkeypatch, segment):
     monkeypatch.setattr(pipeline, "build_atom_url_for_segment", lambda segment: "http://example.com/feed")
     monkeypatch.setattr(pipeline, "fetch_atom_entries", lambda url: (_ for _ in ()).throw(RuntimeError("boom")))
