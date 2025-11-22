@@ -30,7 +30,11 @@ def filter_entries_for_run_type(
     run_type: RunType,
     entries: list[AtomEntry],
 ) -> list[AtomEntry]:
-    """Filter Atom entries based on run type."""
+    """Filter Atom entries based on run type.
+
+    BACKFILL: return all entries.
+    INCREMENTAL: return only entries whose canonical_uri does not yet exist in Judgment.
+    """
 
     if run_type == RunType.BACKFILL:
         return entries
@@ -65,14 +69,14 @@ def process_entry_for_run(
         run.total_entries += 1
         return
 
+    # Re-check even after incremental filtering to guard against concurrent inserts
+    # or changes since the initial filter.
     existing = crud.get_judgment_by_canonical_uri(session, canonical_uri)
     if existing is not None:
         item = crud.create_run_item(
             session, run=run, canonical_uri=canonical_uri, xml_url=entry.xml_url
         )
-        item.status = "SKIPPED_EXISTING"
-        item.judgment_id = existing.id
-        item.finished_at = datetime.now(timezone.utc)
+        crud.mark_run_item_skipped_existing(session, item, judgment_id=existing.id)
         run.skipped_existing += 1
         run.total_entries += 1
         return
@@ -130,6 +134,33 @@ def run_segment(
             atom_url = build_atom_url_for_segment(segment)
             entries = fetch_atom_entries(atom_url)
             filtered_entries = filter_entries_for_run_type(session, run_type, entries)
+
+            if run_type == RunType.INCREMENTAL:
+                filtered_uris = {entry.canonical_uri for entry in filtered_entries}
+                for entry in entries:
+                    if entry.canonical_uri in filtered_uris:
+                        continue
+
+                    existing = crud.get_judgment_by_canonical_uri(
+                        session, entry.canonical_uri
+                    )
+                    if existing is None:
+                        filtered_entries.append(entry)
+                        continue
+
+                    item = crud.create_run_item(
+                        session,
+                        run=run,
+                        canonical_uri=entry.canonical_uri,
+                        xml_url=entry.xml_url,
+                    )
+                    crud.mark_run_item_skipped_existing(
+                        session, item, judgment_id=existing.id
+                    )
+                    run.skipped_existing += 1
+                    run.total_entries += 1
+                    session.commit()
+
             if max_entries is not None:
                 filtered_entries = filtered_entries[:max_entries]
 

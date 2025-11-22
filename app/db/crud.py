@@ -15,7 +15,7 @@ def create_run(
     *,
     segment: Segment,
     run_type: RunType,
-    trigger_type: str = "SYSTEM",
+    trigger_type: str = "UNKNOWN",
 ) -> Run:
     """Create a Run row for a segment and return it (flushed)."""
 
@@ -37,8 +37,16 @@ def create_run(
 
 
 def mark_run_success(session: Session, run: Run) -> None:
-    run.status = "SUCCESS"
-    run.finished_at = datetime.now(timezone.utc)
+    """Set the final status for a run based on counters."""
+
+    now = datetime.now(timezone.utc)
+    if run.failed_items > 0 and run.new_judgments > 0:
+        run.status = "PARTIAL_SUCCESS"
+    elif run.failed_items > 0 and run.new_judgments == 0:
+        run.status = "FAILED"
+    else:
+        run.status = "SUCCESS"
+    run.finished_at = now
 
 
 def mark_run_failure(session: Session, run: Run, exc: BaseException) -> None:
@@ -127,4 +135,15 @@ def mark_run_item_failure(
 ) -> None:
     item.status = "FAILED"
     item.error_message = error_message[:2000]
+    item.finished_at = datetime.now(timezone.utc)
+
+
+def mark_run_item_skipped_existing(
+    session: Session,
+    item: RunItem,
+    *,
+    judgment_id: int,
+) -> None:
+    item.status = "SKIPPED_EXISTING"
+    item.judgment_id = judgment_id
     item.finished_at = datetime.now(timezone.utc)

@@ -339,10 +339,14 @@ Both delegate to `run_segment`, which:
 - Iterates entries with per-entry durability (commit after each item) and rate-limits via `respect_rate_limit` before HTTP calls.
 - For each entry:
   - If the `canonical_uri` is invalid, record a failed `RunItem` and continue.
-  - If a `Judgment` already exists, record a `RunItem` with status `SKIPPED_EXISTING` and increment `skipped_existing`.
+  - If a `Judgment` already exists, record a `RunItem` with status `SKIPPED_EXISTING` and increment `skipped_existing` (incremental runs still log these skips without re-downloading the XML).
   - Otherwise: download XML (`download_xml_for_canonical_uri`), persist it (`store_xml_to_disk`), parse metadata (`parse_judgment_metadata_from_xml`), create a `Judgment`, and mark the `RunItem` `SUCCESS`.
   - Parse errors (`MetadataParseError`) or other exceptions are captured on the `RunItem` (status `FAILED`, truncated `error_message`) while allowing the run to continue.
-- When all entries are processed, mark the `Run` `SUCCESS`; any outer exception marks the `Run` `FAILED` and preserves the error message.
+- `total_entries` counts Atom entries handled during the run (including skipped and failed items).
+- When all entries are processed:
+  - `SUCCESS` if `failed_items == 0`.
+  - `PARTIAL_SUCCESS` if there were failures but at least one new judgment succeeded.
+  - `FAILED` if failures occurred and no new judgments were created (outer errors also mark `FAILED`).
 
 Current incremental semantics: “new” means there is no existing `Judgment` row with the same `canonical_uri`. Future iterations may refine this using timestamps or last successful run markers.
 

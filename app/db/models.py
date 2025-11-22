@@ -110,6 +110,7 @@ class Run(Base):
 
     trigger_type: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'UNKNOWN'"))
     run_type: Mapped[str] = mapped_column(Text, nullable=False)
+    # Stores RunType.value, e.g. "BACKFILL" or "INCREMENTAL".
 
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

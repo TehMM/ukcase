@@ -21,6 +21,13 @@ Scraping modules overview:
 - Rate limiting helpers (app.scraping.rate_limit):
   - get_rate_limit_seconds(segment): returns segment.rate_limit_seconds when set, otherwise falls back to Settings.default_rate_limit_seconds.
   - respect_rate_limit(segment): sleeps for the configured number of seconds. This will be called by higher-level scraping loops between HTTP requests to avoid hammering the UK National Archives.
+
+- Segment scraping pipeline (app.scraping.pipeline):
+  - Public entrypoints: run_backfill_for_segment(segment_id, max_entries=None) and run_incremental_for_segment(segment_id).
+  - Each invocation creates a Run row immediately (status RUNNING, counters zeroed, run_type set).
+  - Entries are fetched via build_atom_url_for_segment and fetch_atom_entries. Incremental runs log SKIPPED_EXISTING items for already-known judgments but do not re-download their XML.
+  - For each processed entry: invalid canonical_uri → FAILED RunItem; existing judgment → SKIPPED_EXISTING; otherwise download, store, parse, and create a Judgment then mark SUCCESS. Parse or other errors set RunItem FAILED and continue.
+  - total_entries counts Atom entries handled in the run (including skipped and failed). Final status: SUCCESS if failed_items == 0; PARTIAL_SUCCESS if failures occurred alongside at least one new judgment; FAILED if failures occurred and no new judgments were created (outer errors also mark FAILED).
 """
 
 DATABASE_SCHEMA = r"""

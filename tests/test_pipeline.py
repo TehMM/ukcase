@@ -133,6 +133,8 @@ def test_backfill_creates_new_judgments(monkeypatch, db_session, segment, fake_m
     assert result.new_judgments == 2
     assert result.skipped_existing == 0
     assert result.failed_items == 0
+    assert result.total_entries == 2
+    assert result.run.status == "SUCCESS"
 
     run_items = db_session.query(RunItem).all()
     assert all(item.status == "SUCCESS" and item.xml_path for item in run_items)
@@ -172,6 +174,8 @@ def test_backfill_skips_existing(monkeypatch, db_session, segment, fake_metadata
     assert len(judgments) == 2
     assert result.new_judgments == 1
     assert result.skipped_existing == 1
+    assert result.total_entries == 2
+    assert result.run.status == "SUCCESS"
     run_items = db_session.query(RunItem).all()
     statuses = {item.canonical_uri: item.status for item in run_items}
     assert statuses["/case/existing"] == "SKIPPED_EXISTING"
@@ -205,10 +209,12 @@ def test_incremental_processes_only_new(monkeypatch, db_session, segment, fake_m
     result = pipeline.run_incremental_for_segment(segment.id)
 
     run_items = db_session.query(RunItem).all()
-    assert len(run_items) == 0
+    assert len(run_items) == len(paths)
+    assert all(item.status == "SKIPPED_EXISTING" for item in run_items)
     assert result.new_judgments == 0
-    assert result.skipped_existing == 0
-    assert result.total_entries == 0
+    assert result.skipped_existing == len(paths)
+    assert result.total_entries == len(paths)
+    assert result.run.status == "SUCCESS"
 
 
 def test_per_entry_failure_is_recorded(monkeypatch, db_session, segment, fake_metadata, tmp_path):
@@ -243,6 +249,8 @@ def test_per_entry_failure_is_recorded(monkeypatch, db_session, segment, fake_me
     assert run_items["/case/good"].status == "SUCCESS"
     assert result.failed_items == 1
     assert result.new_judgments == 1
+    assert result.total_entries == 2
+    assert result.run.status == "PARTIAL_SUCCESS"
 
 
 def test_run_failure_records_status(monkeypatch, segment):
