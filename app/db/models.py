@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from datetime import date, datetime
-import enum
-from decimal import Decimal
 import enum
 from datetime import date, datetime
 from decimal import Decimal
@@ -36,7 +33,9 @@ class Segment(Base):
     decision_date_to: Mapped[Optional[date]] = mapped_column(Date)
 
     backfill_mode: Mapped[str] = mapped_column(Text, server_default=text("'NEW_ONLY'"), nullable=False)
-    rate_limit_seconds: Mapped[Decimal] = mapped_column(Numeric, nullable=False, server_default=text("1.5"))
+    rate_limit_seconds: Mapped[Decimal] = mapped_column(
+        Numeric(6, 2), nullable=False, server_default=text("1.5")
+    )
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 

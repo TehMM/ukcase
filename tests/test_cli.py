@@ -74,6 +74,27 @@ def test_segment_create_and_duplicate():
         assert segment.query == "q"
 
 
+def test_segment_create_rejects_bad_date_and_backfill():
+    bad_date = runner.invoke(app, ["segment", "create", "delta", "--decision-date-from", "2020-99-99"])
+
+    assert bad_date.exit_code != 0
+    assert "Invalid date format" in bad_date.stdout
+
+    invalid_backfill = runner.invoke(
+        app,
+        [
+            "segment",
+            "create",
+            "epsilon",
+            "--backfill-mode",
+            "FULL_HISTORIC",
+        ],
+    )
+
+    assert invalid_backfill.exit_code != 0
+    assert "Allowed values" in invalid_backfill.stdout
+
+
 def test_run_backfill_command(monkeypatch):
     _create_segment("beta")
 

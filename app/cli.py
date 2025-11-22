@@ -2,6 +2,7 @@ from datetime import date
 from typing import Optional
 
 import typer
+from typer import BadParameter
 
 from app.db import crud
 from app.db.base import SessionLocal
@@ -16,10 +17,24 @@ app.add_typer(segment_app, name="segment")
 app.add_typer(run_app, name="run")
 
 
+VALID_BACKFILL_MODES = {"NEW_ONLY", "FULL_HISTORY"}
+
+
 def _parse_date(value: Optional[str]) -> Optional[date]:
     if value is None:
         return None
-    return date.fromisoformat(value)
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:  # pragma: no cover - defensive
+        raise BadParameter("Invalid date format, expected YYYY-MM-DD") from exc
+
+
+def _validate_backfill_mode(value: str) -> str:
+    if value not in VALID_BACKFILL_MODES:
+        raise BadParameter(
+            f"Invalid backfill_mode {value!r}. Allowed values: {', '.join(sorted(VALID_BACKFILL_MODES))}."
+        )
+    return value
 
 
 @segment_app.command("list")
@@ -76,7 +91,7 @@ def segment_create(
             courts=court or None,
             decision_date_from=_parse_date(decision_date_from),
             decision_date_to=_parse_date(decision_date_to),
-            backfill_mode=backfill_mode,
+            backfill_mode=_validate_backfill_mode(backfill_mode),
             rate_limit_seconds=rate_limit_seconds,
             is_active=is_active,
         )
@@ -119,7 +134,10 @@ def segment_update(
     ),
     is_active: Optional[bool] = typer.Option(None, help="Whether the segment is active."),
 ) -> None:
-    """Update fields on an existing segment."""
+    """Update fields on an existing segment.
+
+    TODO: allow clearing optional fields (query/courts/dates) explicitly.
+    """
 
     with SessionLocal() as session:
         segment = crud.get_segment_by_id(session, segment_id)
@@ -137,7 +155,7 @@ def segment_update(
         if decision_date_to is not None:
             updates["decision_date_to"] = _parse_date(decision_date_to)
         if backfill_mode is not None:
-            updates["backfill_mode"] = backfill_mode
+            updates["backfill_mode"] = _validate_backfill_mode(backfill_mode)
         if rate_limit_seconds is not None:
             updates["rate_limit_seconds"] = rate_limit_seconds
         if is_active is not None:

@@ -7,7 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# Provide a lightweight SQLAlchemy stub when the dependency is unavailable.
+# Provide a lightweight SQLAlchemy stub so tests remain self-contained even
+# when SQLAlchemy is not installed in the environment.
 if "sqlalchemy" not in sys.modules:  # pragma: no cover
     store: dict[type, dict[int, object]] = {}
 
@@ -210,7 +211,8 @@ if "sqlalchemy" not in sys.modules:  # pragma: no cover
     sys.modules["sqlalchemy.dialects.postgresql"] = postgres
 
 
-# Provide a minimal pydantic_settings stub when absent.
+# Provide a minimal pydantic_settings stub so tests do not require the real
+# dependency.
 if "pydantic_settings" not in sys.modules:  # pragma: no cover
     pydantic_settings = types.ModuleType("pydantic_settings")
 
@@ -228,10 +230,14 @@ if "pydantic_settings" not in sys.modules:  # pragma: no cover
     sys.modules["pydantic_settings"] = pydantic_settings
 
 
-# Provide a small Typer stub when typer is unavailable.
+# Provide a small Typer stub when typer is unavailable to keep CLI tests
+# lightweight.
 if "typer" not in sys.modules:  # pragma: no cover
     typer = types.ModuleType("typer")
     typer_output: list[str] = []
+
+    class BadParameter(Exception):
+        pass
 
     class Typer:
         def __init__(self, *args, **kwargs):
@@ -303,7 +309,7 @@ if "typer" not in sys.modules:  # pragma: no cover
             while remaining:
                 token = remaining.pop(0)
                 if token.startswith("--"):
-                    key = token.lstrip("-")
+                    key = token.lstrip("-").replace("-", "_")
                     if not remaining:
                         options[key] = True
                         continue
@@ -320,11 +326,16 @@ if "typer" not in sys.modules:  # pragma: no cover
                         raw = positional_args.pop(0)
                         bound_args.append(self._convert(raw, param.annotation))
                     elif param.name in options:
-                        bound_args.append(self._convert(options.pop(param.name), param.annotation))
+                        kwargs[param.name] = self._convert(options[param.name], param.annotation)
+                        continue
                 if param.name in options:
                     kwargs[param.name] = self._convert(options[param.name], param.annotation)
 
-            return func(*bound_args, **kwargs)
+            try:
+                return func(*bound_args, **kwargs)
+            except BadParameter as exc:
+                echo(str(exc))
+                raise SystemExit(2)
 
         @staticmethod
         def _convert(value, annotation):
@@ -346,10 +357,12 @@ if "typer" not in sys.modules:  # pragma: no cover
             return Result(exit_code=exit_code, stdout=stdout)
 
     testing.CliRunner = CliRunner
+    typer.BadParameter = BadParameter
     sys.modules["typer.testing"] = testing
 
 
-# Provide lightweight feedparser/httpx stubs when missing.
+# Provide lightweight feedparser/httpx stubs to keep network-facing code testable
+# without external dependencies.
 if "feedparser" not in sys.modules:  # pragma: no cover
     feedparser = types.ModuleType("feedparser")
 

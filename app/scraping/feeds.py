@@ -7,12 +7,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, List, Optional
 from urllib.parse import urlencode, urljoin, urlsplit
 
-import time
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, List, Optional, TYPE_CHECKING
-from urllib.parse import urlencode, urljoin, urlsplit
-
 import feedparser
 import httpx
 
@@ -159,6 +153,12 @@ def fetch_atom_entries(segment: Segment) -> List[AtomEntry]:
     """Fetch Atom entries for a segment using httpx and feedparser."""
 
     feed_url = build_atom_url_for_segment(segment)
+    delay = getattr(segment, "rate_limit_seconds", None)
+    if delay is None:
+        delay = getattr(get_settings(), "default_rate_limit_seconds", 0)
+    if delay and delay > 0:
+        time.sleep(float(delay))
+
     feed_text = _fetch_atom_feed(feed_url)
     parsed = feedparser.parse(feed_text)
 

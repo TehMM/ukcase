@@ -190,7 +190,7 @@ CREATE TABLE segments (
     decision_date_to    DATE,
 
     backfill_mode       TEXT NOT NULL DEFAULT 'NEW_ONLY',
-    rate_limit_seconds  NUMERIC NOT NULL DEFAULT 1.5, -- default ~1 request / 1.5s
+    rate_limit_seconds  NUMERIC(6, 2) NOT NULL DEFAULT 1.5, -- default ~1 request / 1.5s
 
     is_active           BOOLEAN NOT NULL DEFAULT TRUE,
 
@@ -337,21 +337,21 @@ Current incremental semantics: “new” means there is no existing `Judgment` r
 4. Configuration & Environment
 4.1 Environment Variables
 
-APP_ENV – dev / prod / etc.
+UKCASE_APP_ENV – dev / prod / etc.
 
-DATABASE_URL – PostgreSQL connection string.
+UKCASE_DATABASE_URL – PostgreSQL connection string (tests default to SQLite fallback).
 
-REDIS_URL – Redis connection for RQ.
+UKCASE_REDIS_URL – Redis connection for RQ.
 
-APP_BASE_URL – e.g. https://caselaw-scraper.example.com.
+UKCASE_APP_BASE_URL – e.g. https://caselaw-scraper.example.com.
 
-ADMIN_USERNAME, ADMIN_PASSWORD – for basic auth on UI.
+UKCASE_ADMIN_USERNAME, UKCASE_ADMIN_PASSWORD – for basic auth on UI.
 
-DEFAULT_RATE_LIMIT_SECONDS – default rate limit (e.g. 1.5).
+UKCASE_DEFAULT_RATE_LIMIT_SECONDS – default rate limit (e.g. 1.5).
 
-REQUEST_TIMEOUT_SECONDS – e.g. 20.
+UKCASE_REQUEST_TIMEOUT_SECONDS – e.g. 20.
 
-MAX_HTTP_RETRIES – e.g. 4.
+UKCASE_MAX_HTTP_RETRIES – e.g. 4.
 
 4.2 Security
 
@@ -380,6 +380,7 @@ decision_date_from / decision_date_to – optional bounds for decision date filt
 backfill_mode – scraper behaviour hint, default NEW_ONLY (process new items only) or FULL_HISTORY for full backfill.
 
 rate_limit_seconds – per-segment override; default is from env (1.5s).
+Stored as NUMERIC(6, 2) to bound values to sensible precision.
 
 is_active – whether the segment participates in scheduled/surfaced lists.
 
@@ -394,6 +395,10 @@ query = segment.query (if not null)
 court = each element of segment.courts as repeated parameter
 
 decision_date_from / decision_date_to = ISO date strings if provided.
+
+Note: decision_date_from / decision_date_to parameter names reflect the current
+understanding of the TNA Atom API. If upstream naming differs, update the code
+and this document together.
 
 Example:
 
@@ -1014,3 +1019,9 @@ Typer-based CLI lives in `app/cli.py` exposed via the `ukcase` console script. C
 * `ukcase run incremental SEGMENT_ID` – trigger an incremental run for a segment.
 
 Run commands delegate to `pipeline.run_backfill_for_segment` and `pipeline.run_incremental_for_segment`, ensuring consistent run tracking semantics.
+
+Notes:
+
+* `backfill_mode` is validated against `NEW_ONLY` and `FULL_HISTORY`; invalid values are rejected.
+* Optional fields cannot yet be cleared via `segment update`; a follow-up flag set will address reset semantics.
+* `segment delete` performs an immediate deletion (no interactive confirmation) to keep automation simple.

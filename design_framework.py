@@ -15,6 +15,8 @@ If code diverges from that design, either:
 Scraping modules overview:
 - Atom feed utilities (app.scraping.feeds):
   - build_atom_url_for_segment(segment): constructs the Atom feed URL based on Segment fields (query, courts, decision_date_from, decision_date_to).
+    The decision_date_* parameter names reflect the current understanding of the
+    TNA Atom API and should be updated if upstream naming differs.
   - fetch_atom_entries(segment): fetches the Atom feed using httpx with retry/backoff and parses it via feedparser into a list of AtomEntry objects.
   - AtomEntry: dataclass with canonical_uri, link, title, updated, published, and a computed xml_url property that derives the XML download URL.
 
@@ -45,7 +47,7 @@ CREATE TABLE segments (
     decision_date_to    DATE,
 
     backfill_mode       TEXT NOT NULL DEFAULT 'NEW_ONLY',
-    rate_limit_seconds  NUMERIC NOT NULL DEFAULT 1.5,
+    rate_limit_seconds  NUMERIC(6, 2) NOT NULL DEFAULT 1.5,
 
     is_active           BOOLEAN NOT NULL DEFAULT TRUE,
 

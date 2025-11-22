@@ -132,6 +132,22 @@ def test_build_atom_url_with_query_courts_and_dates():
     )
 
 
+def test_build_atom_url_with_query_and_courts_only():
+    segment = SimpleNamespace(
+        query="fiduciary",
+        courts=["ewhc/ch", "ewhc/comm"],
+        decision_date_from=None,
+        decision_date_to=None,
+    )
+
+    url = feeds.build_atom_url_for_segment(segment)
+
+    assert (
+        url
+        == "https://caselaw.nationalarchives.gov.uk/atom.xml?query=fiduciary&court=ewhc%2Fch&court=ewhc%2Fcomm"
+    )
+
+
 @pytest.fixture
 def sample_atom_xml():
     return """
@@ -150,10 +166,13 @@ def sample_atom_xml():
 
 
 def test_fetch_atom_entries_parses_sample(monkeypatch, sample_atom_xml):
+    sleep_calls: list[float] = []
+
     def fake_get(url: str, headers=None, timeout: int | None = None):
         return httpx.Response(status_code=200, text=sample_atom_xml)
 
     monkeypatch.setattr(feeds.httpx, "get", fake_get)
+    monkeypatch.setattr(feeds.time, "sleep", lambda seconds: sleep_calls.append(seconds))
 
     segment = SimpleNamespace()
     entries = feeds.fetch_atom_entries(segment)
@@ -166,6 +185,22 @@ def test_fetch_atom_entries_parses_sample(monkeypatch, sample_atom_xml):
     assert entry.updated == datetime(2025, 2, 1, 0, 0)
     assert entry.published == datetime(2025, 1, 31, 0, 0)
     assert entry.xml_url == "https://caselaw.nationalarchives.gov.uk/ewhc/comm/2025/3036/data.xml"
+    assert sleep_calls == [1.5]
+
+
+def test_fetch_atom_entries_respects_segment_rate_limit(monkeypatch, sample_atom_xml):
+    sleep_calls: list[float] = []
+
+    def fake_get(url: str, headers=None, timeout: int | None = None):
+        return httpx.Response(status_code=200, text=sample_atom_xml)
+
+    monkeypatch.setattr(feeds.httpx, "get", fake_get)
+    monkeypatch.setattr(feeds.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    segment = SimpleNamespace(rate_limit_seconds=2.25)
+    feeds.fetch_atom_entries(segment)
+
+    assert sleep_calls == [2.25]
 
 
 def test_derive_xml_url_handles_missing_leading_slash():
