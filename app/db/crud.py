@@ -216,3 +216,25 @@ def delete_segment(session: Session, segment: Segment) -> None:
 
     session.delete(segment)
     session.flush()
+
+
+def list_recent_runs(session: Session, limit: int = 50) -> list[Run]:
+    """Return recent runs ordered by start time descending."""
+
+    stmt = select(Run).order_by(Run.started_at.desc()).limit(limit)
+    return list(session.execute(stmt).scalars())
+
+
+def get_run_with_items(session: Session, run_id: int) -> tuple[Run, list[RunItem]]:
+    """Return a run and its associated items."""
+
+    run = session.get(Run, run_id)
+    if run is None:
+        raise ValueError(f"Run {run_id} not found")
+
+    items = (
+        session.execute(select(RunItem).where(RunItem.run_id == run.id).order_by(RunItem.id))
+        .scalars()
+        .all()
+    )
+    return run, items

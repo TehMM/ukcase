@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     http_user_agent: str = "ukcase-scraper/0.1 (+contact: CHANGE_ME)"
     xml_storage_root: Path = Path("./data/xml")
 
+    changedetection_webhook_secret: str | None = None
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
@@ -49,4 +51,8 @@ def get_settings() -> Settings:
         settings.admin_username = os.environ.get("UKCASE_ADMIN_USERNAME", "admin")
     if not hasattr(settings, "admin_password"):
         settings.admin_password = os.environ.get("UKCASE_ADMIN_PASSWORD", "password")
+    if not getattr(settings, "changedetection_webhook_secret", None):
+        settings.changedetection_webhook_secret = os.environ.get(
+            "UKCASE_CHANGEDTECTION_WEBHOOK_SECRET"
+        )
     return settings

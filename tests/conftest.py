@@ -80,6 +80,9 @@ if "sqlalchemy" not in sys.modules:  # pragma: no cover
         def order_by(self, *args, **kwargs):
             return self
 
+        def limit(self, _limit):
+            return self
+
         def first(self):
             return self._results[0] if self._results else None
 
@@ -102,6 +105,9 @@ if "sqlalchemy" not in sys.modules:  # pragma: no cover
         def __iter__(self):
             return iter(self._rows)
 
+        def all(self):
+            return list(self._rows)
+
     class FakeSelect:
         def __init__(self, model):
             self.model = model
@@ -112,6 +118,9 @@ if "sqlalchemy" not in sys.modules:  # pragma: no cover
             return self
 
         def order_by(self, *args, **kwargs):
+            return self
+
+        def limit(self, _limit):
             return self
 
         def execute(self, session):
@@ -228,6 +237,328 @@ if "pydantic_settings" not in sys.modules:  # pragma: no cover
     pydantic_settings.BaseSettings = BaseSettings
     pydantic_settings.SettingsConfigDict = SettingsConfigDict
     sys.modules["pydantic_settings"] = pydantic_settings
+
+
+# Provide a lightweight FastAPI stub when the dependency is unavailable.
+if "fastapi" not in sys.modules:  # pragma: no cover
+    import base64
+    import inspect
+    import json
+
+    fastapi = types.ModuleType("fastapi")
+
+    class HTTPException(Exception):
+        def __init__(self, status_code: int, detail: str | None = None, headers: dict | None = None):
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
+            self.headers = headers or {}
+
+    class Depends:
+        def __init__(self, dependency):
+            self.dependency = dependency
+
+    class Query:
+        def __init__(self, default=...):
+            self.default = default
+
+    class Request:
+        def __init__(self, headers=None, auth=None, query_params=None):
+            self.headers = headers or {}
+            self.auth = auth
+            self.query_params = query_params or {}
+
+    class Response:
+        def __init__(self, content="", status_code: int = 200, headers=None):
+            self.content = content
+            self.text = content if isinstance(content, str) else str(content)
+            self.status_code = status_code
+            self.headers = headers or {}
+
+        def json(self):
+            return json.loads(self.text)
+
+    class HTMLResponse(Response):
+        pass
+
+    class JSONResponse(Response):
+        def __init__(self, content=None, status_code: int = 200, headers=None):
+            import json as _json
+
+            super().__init__(
+                content=_json.dumps(content or {}),
+                status_code=status_code,
+                headers=headers,
+            )
+
+    class RedirectResponse(Response):
+        def __init__(self, url: str, status_code: int = 302, headers=None):
+            headers = headers or {}
+            headers.setdefault("location", url)
+            super().__init__(content="", status_code=status_code, headers=headers)
+
+    def _render_template(context):
+        parts: list[str] = []
+        if "segments" in context:
+            names = [getattr(seg, "name", str(seg)) for seg in context["segments"]]
+            parts.append(";".join(names))
+        if "result" in context:
+            res = context["result"]
+            run_status = getattr(getattr(res, "run", None), "status", "")
+            parts.append(
+                f"{run_status} new={res.new_judgments} skipped={res.skipped_existing} failed={res.failed_items}"
+            )
+        if "runs" in context:
+            parts.append(
+                ",".join(str(getattr(run, "id", run)) for run in context.get("runs", []))
+            )
+        if "run" in context:
+            run = context["run"]
+            parts.append(str(getattr(run, "status", "")))
+            parts.append(str(getattr(run, "id", "")))
+        if "items" in context:
+            parts.append(
+                ",".join(getattr(item, "canonical_uri", str(item)) for item in context.get("items", []))
+            )
+        return " | ".join([part for part in parts if part]) or ""
+
+    class TemplateResponse(HTMLResponse):
+        def __init__(self, template_name: str, context: dict, status_code: int = 200):
+            super().__init__(content=_render_template(context), status_code=status_code)
+
+    class Jinja2Templates:
+        def __init__(self, directory: str):
+            self.directory = directory
+
+        def TemplateResponse(self, template_name: str, context: dict, status_code: int = 200):
+            return TemplateResponse(template_name, context, status_code=status_code)
+
+    class _Status:
+        HTTP_401_UNAUTHORIZED = 401
+        HTTP_403_FORBIDDEN = 403
+        HTTP_404_NOT_FOUND = 404
+        HTTP_422_UNPROCESSABLE_ENTITY = 422
+        HTTP_302_FOUND = 302
+
+    status = _Status()
+
+    class _Route:
+        def __init__(self, path, method, func):
+            self.path = path
+            self.method = method
+            self.func = func
+
+    class APIRouter:
+        def __init__(self):
+            self.routes = []
+
+        def get(self, path, response_class=HTMLResponse):
+            def decorator(func):
+                self.routes.append(_Route(path, "GET", func))
+                return func
+
+            return decorator
+
+        def post(self, path, response_class=HTMLResponse):
+            def decorator(func):
+                self.routes.append(_Route(path, "POST", func))
+                return func
+
+            return decorator
+
+    class FastAPI(APIRouter):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+            self.routers = []
+
+        def include_router(self, router: APIRouter):
+            self.routers.append(router)
+
+    class HTTPBasicCredentials:
+        def __init__(self, username: str, password: str):
+            self.username = username
+            self.password = password
+
+    class HTTPBasic:
+        def __call__(self, request: Request) -> HTTPBasicCredentials:
+            username = password = None
+            if request.auth:
+                username, password = request.auth
+            elif "authorization" in {k.lower() for k in request.headers}:
+                header_value = request.headers.get("Authorization") or request.headers.get("authorization")
+                if header_value and header_value.startswith("Basic "):
+                    encoded = header_value.split(" ", 1)[1]
+                    decoded = base64.b64decode(encoded).decode()
+                    username, password = decoded.split(":", 1)
+
+            if username is None or password is None:
+                raise HTTPException(
+                    status_code=_Status.HTTP_401_UNAUTHORIZED,
+                    detail="Not authenticated",
+                    headers={"WWW-Authenticate": "Basic"},
+                )
+            return HTTPBasicCredentials(username=username, password=password)
+
+    def DependsStub(dep):
+        return Depends(dep)
+
+    def QueryStub(default=...):
+        return Query(default)
+
+    def _match_route(path: str, route_path: str):
+        path_parts = [p for p in path.split("/") if p]
+        route_parts = [p for p in route_path.split("/") if p]
+        if len(path_parts) != len(route_parts):
+            return None
+        params = {}
+        for part, route_part in zip(path_parts, route_parts):
+            if route_part.startswith("{") and route_part.endswith("}"):
+                params[route_part.strip("{}")]=part
+            elif part != route_part:
+                return None
+        return params
+
+    def _resolve_dependencies(func, request: Request, path_params: dict, query_params: dict):
+        kwargs = {}
+        sig = inspect.signature(func)
+        for name, param in sig.parameters.items():
+            if name == "request":
+                kwargs[name] = request
+                continue
+            default = param.default
+            if isinstance(default, Query):
+                if name in query_params:
+                    value = query_params[name]
+                elif default.default is ...:
+                    raise HTTPException(_Status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Missing parameter")
+                else:
+                    value = default.default
+                if param.annotation is int:
+                    try:
+                        value = int(value)
+                    except Exception:
+                        pass
+                kwargs[name] = value
+                continue
+            if isinstance(default, Depends):
+                dep = default.dependency
+                if isinstance(dep, HTTPBasic):
+                    kwargs[name] = dep(request)
+                    continue
+                if callable(dep):
+                    dep_kwargs = _resolve_dependencies(dep, request, path_params, query_params)
+                    value = dep(**dep_kwargs)
+                else:
+                    value = dep
+                if hasattr(value, "__iter__") and not isinstance(value, (str, bytes, dict)):
+                    try:
+                        value = next(value)
+                    except StopIteration:
+                        value = None
+                kwargs[name] = value
+                continue
+            if name in path_params:
+                value = path_params[name]
+                if param.annotation is int:
+                    try:
+                        value = int(value)
+                    except Exception:
+                        pass
+                kwargs[name] = value
+                continue
+            kwargs[name] = default if default is not inspect._empty else None
+        return kwargs
+
+    class TestResponse:
+        def __init__(self, response: Response):
+            self.status_code = response.status_code
+            self.headers = {k.lower(): v for k, v in response.headers.items()}
+            self.text = response.text
+            self.content = response.content
+
+        def json(self):
+            import json as _json
+
+            return _json.loads(self.text)
+
+    class TestClient:
+        def __init__(self, app: FastAPI):
+            self.app = app
+
+        def _find_route(self, method: str, path: str):
+            for route in self.app.routes:
+                params = _match_route(path, route.path)
+                if route.method == method and params is not None:
+                    return route, params
+            for router in getattr(self.app, "routers", []):
+                for route in router.routes:
+                    params = _match_route(path, route.path)
+                    if route.method == method and params is not None:
+                        return route, params
+            return None, None
+
+        def _handle(self, method: str, path: str, params=None, auth=None, data=None):
+            params = params or {}
+            route, path_params = self._find_route(method, path)
+            if route is None:
+                return TestResponse(Response(status_code=404, content="Not found"))
+            request = Request(headers={}, auth=auth, query_params=params)
+            try:
+                kwargs = _resolve_dependencies(route.func, request, path_params or {}, params)
+                result = route.func(**kwargs)
+                if inspect.iscoroutine(result):
+                    import asyncio
+
+                    result = asyncio.run(result)
+            except HTTPException as exc:
+                return TestResponse(Response(content=str(exc.detail), status_code=exc.status_code, headers=exc.headers))
+            if isinstance(result, Response):
+                return TestResponse(result)
+            if isinstance(result, dict):
+                return TestResponse(JSONResponse(result))
+            return TestResponse(Response(result or ""))
+
+        def get(self, path: str, params=None, auth=None):
+            return self._handle("GET", path, params=params, auth=auth)
+
+        def post(self, path: str, params=None, auth=None, data=None):
+            return self._handle("POST", path, params=params, auth=auth, data=data)
+
+    fastapi.FastAPI = FastAPI
+    fastapi.APIRouter = APIRouter
+    fastapi.Depends = DependsStub
+    fastapi.Query = QueryStub
+    fastapi.HTTPException = HTTPException
+    fastapi.status = status
+    fastapi.Request = Request
+    fastapi.responses = types.SimpleNamespace(
+        HTMLResponse=HTMLResponse,
+        JSONResponse=JSONResponse,
+        RedirectResponse=RedirectResponse,
+        Response=Response,
+    )
+    sys.modules["fastapi"] = fastapi
+
+    responses_mod = types.ModuleType("fastapi.responses")
+    responses_mod.HTMLResponse = HTMLResponse
+    responses_mod.JSONResponse = JSONResponse
+    responses_mod.RedirectResponse = RedirectResponse
+    responses_mod.Response = Response
+    sys.modules["fastapi.responses"] = responses_mod
+
+    templating_mod = types.ModuleType("fastapi.templating")
+    templating_mod.Jinja2Templates = Jinja2Templates
+    sys.modules["fastapi.templating"] = templating_mod
+
+    security_mod = types.ModuleType("fastapi.security")
+    security_mod.HTTPBasic = HTTPBasic
+    security_mod.HTTPBasicCredentials = HTTPBasicCredentials
+    sys.modules["fastapi.security"] = security_mod
+
+    testclient_mod = types.ModuleType("fastapi.testclient")
+    testclient_mod.TestClient = TestClient
+    sys.modules["fastapi.testclient"] = testclient_mod
+
 
 
 # Provide a small Typer stub when typer is unavailable to keep CLI tests
@@ -401,7 +732,7 @@ if "feedparser" not in sys.modules:  # pragma: no cover
 if "httpx" not in sys.modules:  # pragma: no cover
     httpx = types.ModuleType("httpx")
 
-    class Response:
+    class HTTPXResponse:
         def __init__(self, status_code: int, text: str = "", content: bytes | None = None, request=None):
             self.status_code = status_code
             self.text = text
@@ -422,12 +753,12 @@ if "httpx" not in sys.modules:  # pragma: no cover
         OK = 200
         TOO_MANY_REQUESTS = 429
 
-    httpx.Response = Response
+    httpx.Response = HTTPXResponse
     httpx.HTTPStatusError = HTTPStatusError
     httpx.codes = Codes()
 
     def _missing_get(*args, **kwargs):  # pragma: no cover
-        return Response(status_code=200, text="")
+        return HTTPXResponse(status_code=200, text="")
 
     httpx.get = _missing_get
     sys.modules["httpx"] = httpx

@@ -94,6 +94,27 @@ Webhook endpoints (ChangeDetection.io).
 
 Uses Jinja2 + HTMX for a simple admin UI.
 
+2.2 Web app and admin UI
+
+- FastAPI app is created via `app.web.main.create_app()` and exposes:
+  - `/healthz` simple JSON probe.
+  - Admin HTML routes mounted from `app.web.routes_admin` (templated with Jinja2 in `app/templates`).
+  - Webhook routes from `app.web.routes_webhook`.
+- Admin UI security:
+  - HTTP Basic authentication using `UKCASE_ADMIN_USERNAME` / `UKCASE_ADMIN_PASSWORD` (settings.admin_username/password).
+  - Expected to be deployed behind HTTPS termination (e.g., Coolify / reverse proxy).
+- Admin pages:
+  - `/admin/segments` lists segments and provides HTMX buttons to trigger backfill or incremental runs per segment. Buttons POST to `/admin/segments/{segment_id}/run/backfill` and `/admin/segments/{segment_id}/run/incremental` and render small partials with run status/counters.
+  - `/admin/runs` lists up to 50 recent runs via `crud.list_recent_runs` with links to details.
+  - `/admin/runs/{run_id}` shows run metadata and associated RunItems (canonical_uri, status, error_message) fetched via `crud.get_run_with_items`.
+  - Templates include HTMX + Alpine from CDNs via `app/templates/base.html`.
+- Webhook: ChangeDetection.io
+  - Endpoint: `POST /webhook/changedetection`.
+  - Query parameters: `segment_id` (int), `secret` (str).
+  - Secret must match `UKCASE_CHANGEDTECTION_WEBHOOK_SECRET` (settings.changedetection_webhook_secret) or the endpoint returns HTTP 403.
+  - On success, triggers `pipeline.run_incremental_for_segment(segment_id)` and returns a JSON summary (run_id, segment_id, status, total_entries, new_judgments, skipped_existing, failed_items).
+  - Example CD.io notification URL: `https://example.com/webhook/changedetection?segment_id=12&secret=YOUR_SECRET`.
+
 Task Queue (RQ + Redis)
 
 Job types:

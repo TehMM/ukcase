@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Segments</h1>
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Name</th>
+      <th>Active</th>
+      <th>Query</th>
+      <th>Courts</th>
+      <th>Actions</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for seg in segments %}
+    <tr>
+      <td>{{ seg.id }}</td>
+      <td>{{ seg.name }}</td>
+      <td>{{ seg.is_active }}</td>
+      <td>{{ seg.query }}</td>
+      <td>{{ seg.courts }}</td>
+      <td>
+        <button class="btn" hx-post="/admin/segments/{{ seg.id }}/run/backfill" hx-target="#segment-{{ seg.id }}-status" hx-swap="innerHTML">Backfill</button>
+        <button class="btn secondary" hx-post="/admin/segments/{{ seg.id }}/run/incremental" hx-target="#segment-{{ seg.id }}-status" hx-swap="innerHTML">Incremental</button>
+      </td>
+      <td id="segment-{{ seg.id }}-status"></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

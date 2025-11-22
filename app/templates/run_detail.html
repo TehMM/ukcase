@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Run {{ run.id }}</h1>
+<p><strong>Segment:</strong> {{ run.segment_id }}</p>
+<p><strong>Status:</strong> {{ run.status }}</p>
+<p><strong>Run Type:</strong> {{ run.run_type }}</p>
+<p><strong>Started:</strong> {{ run.started_at }}</p>
+<p><strong>Finished:</strong> {{ run.finished_at }}</p>
+<p><strong>Total Entries:</strong> {{ run.total_entries }}</p>
+<p><strong>New Judgments:</strong> {{ run.new_judgments }}</p>
+<p><strong>Skipped Existing:</strong> {{ run.skipped_existing }}</p>
+<p><strong>Failed Items:</strong> {{ run.failed_items }}</p>
+
+<h2>Items</h2>
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Canonical URI</th>
+      <th>Status</th>
+      <th>Error Message</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in items %}
+    <tr>
+      <td>{{ item.id }}</td>
+      <td>{{ item.canonical_uri }}</td>
+      <td>{{ item.status }}</td>
+      <td>{{ item.error_message }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

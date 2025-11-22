@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ukcase admin</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; background-color: #f7f7f7; }
+    table { border-collapse: collapse; width: 100%; background: #fff; }
+    th, td { padding: 0.5rem 0.75rem; border: 1px solid #ddd; text-align: left; }
+    th { background: #f0f0f0; }
+    a { color: #0b5ed7; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .btn { padding: 0.35rem 0.6rem; border: 1px solid #0b5ed7; background: #0b5ed7; color: #fff; border-radius: 4px; cursor: pointer; }
+    .btn.secondary { background: #fff; color: #0b5ed7; }
+    nav { margin-bottom: 1rem; }
+    nav a { margin-right: 1rem; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/admin/segments">Segments</a>
+    <a href="/admin/runs">Runs</a>
+  </nav>
+  {% block content %}{% endblock %}
+</body>
+</html>

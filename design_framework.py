@@ -30,6 +30,12 @@ Scraping modules overview:
   - Entries are fetched via build_atom_url_for_segment and fetch_atom_entries. Incremental runs log SKIPPED_EXISTING items for already-known judgments but do not re-download their XML.
   - For each processed entry: invalid canonical_uri → FAILED RunItem; existing judgment → SKIPPED_EXISTING; otherwise download, store, parse, and create a Judgment then mark SUCCESS. Parse or other errors set RunItem FAILED and continue.
   - total_entries counts Atom entries handled in the run (including skipped and failed). Final status: SUCCESS if failed_items == 0; PARTIAL_SUCCESS if failures occurred alongside at least one new judgment; FAILED if failures occurred and no new judgments were created (outer errors also mark FAILED).
+
+- Web application (app.web):
+  - create_app() builds a FastAPI app with /healthz, admin routes, and webhook routes mounted.
+  - Admin UI uses HTTP Basic auth (settings.admin_username/password) and Jinja2 templates (app/templates) with HTMX/Alpine for progressive enhancement.
+  - Routes include /admin/segments (list + trigger backfill/incremental via pipeline entrypoints), /admin/runs (recent runs), and /admin/runs/{id} (details + items).
+  - ChangeDetection.io webhook lives at POST /webhook/changedetection with query params secret + segment_id. The secret must match settings.changedetection_webhook_secret; otherwise 403 is returned. Successful calls trigger run_incremental_for_segment.
 """
 
 DATABASE_SCHEMA = r"""
