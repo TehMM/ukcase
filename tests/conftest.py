@@ -240,6 +240,7 @@ if "pydantic_settings" not in sys.modules:  # pragma: no cover
 
 
 # Provide a lightweight FastAPI stub when the dependency is unavailable.
+# TODO: remove this stub once the test environment ships with FastAPI installed.
 if "fastapi" not in sys.modules:  # pragma: no cover
     import base64
     import inspect
@@ -366,45 +367,6 @@ if "fastapi" not in sys.modules:  # pragma: no cover
 
             return decorator
 
-    class FastAPI(APIRouter):
-        def __init__(self, *args, **kwargs):
-            super().__init__()
-            self.routers = []
-
-        def include_router(self, router: APIRouter):
-            self.routers.append(router)
-
-    class HTTPBasicCredentials:
-        def __init__(self, username: str, password: str):
-            self.username = username
-            self.password = password
-
-    class HTTPBasic:
-        def __call__(self, request: Request) -> HTTPBasicCredentials:
-            username = password = None
-            if request.auth:
-                username, password = request.auth
-            elif "authorization" in {k.lower() for k in request.headers}:
-                header_value = request.headers.get("Authorization") or request.headers.get("authorization")
-                if header_value and header_value.startswith("Basic "):
-                    encoded = header_value.split(" ", 1)[1]
-                    decoded = base64.b64decode(encoded).decode()
-                    username, password = decoded.split(":", 1)
-
-            if username is None or password is None:
-                raise HTTPException(
-                    status_code=_Status.HTTP_401_UNAUTHORIZED,
-                    detail="Not authenticated",
-                    headers={"WWW-Authenticate": "Basic"},
-                )
-            return HTTPBasicCredentials(username=username, password=password)
-
-    def DependsStub(dep):
-        return Depends(dep)
-
-    def QueryStub(default=...):
-        return Query(default)
-
     def _match_route(path: str, route_path: str):
         path_parts = [p for p in path.split("/") if p]
         route_parts = [p for p in route_path.split("/") if p]
@@ -482,7 +444,7 @@ if "fastapi" not in sys.modules:  # pragma: no cover
             return _json.loads(self.text)
 
     class TestClient:
-        def __init__(self, app: FastAPI):
+        def __init__(self, app):
             self.app = app
 
         def _find_route(self, method: str, path: str):
@@ -524,41 +486,70 @@ if "fastapi" not in sys.modules:  # pragma: no cover
         def post(self, path: str, params=None, auth=None, data=None):
             return self._handle("POST", path, params=params, auth=auth, data=data)
 
-    fastapi.FastAPI = FastAPI
+    class FastAPI(APIRouter):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+            self.routers = []
+
+        def include_router(self, router: APIRouter):
+            self.routers.append(router)
+
+    class HTTPBasicCredentials:
+        def __init__(self, username: str, password: str):
+            self.username = username
+            self.password = password
+
+    class HTTPBasic:
+        def __call__(self, request: Request) -> HTTPBasicCredentials:
+            username = password = None
+            if request.auth:
+                username, password = request.auth
+            elif "authorization" in {k.lower() for k in request.headers}:
+                header_value = request.headers.get("Authorization") or request.headers.get("authorization")
+                if header_value and header_value.startswith("Basic "):
+                    encoded = header_value.split(" ", 1)[1]
+                    decoded = base64.b64decode(encoded).decode()
+                    username, password = decoded.split(":", 1)
+
+            if username is None or password is None:
+                raise HTTPException(
+                    status_code=_Status.HTTP_401_UNAUTHORIZED,
+                    detail="Not authenticated",
+                    headers={"WWW-Authenticate": "Basic"},
+                )
+            return HTTPBasicCredentials(username=username, password=password)
+
+    class HTTPBasicStub(HTTPBasic):  # pragma: no cover - mirrors FastAPI signature
+        def __call__(self, request: Request) -> HTTPBasicCredentials:
+            return super().__call__(request)
+
+    class HTTPBasicCredentialsStub(HTTPBasicCredentials):
+        pass
+
+    class TemplateResponseStub(TemplateResponse):
+        pass
+
+    fastapi.Depends = Depends
+    fastapi.Query = Query
+    fastapi.Request = Request
+    fastapi.Response = Response
+    fastapi.HTMLResponse = HTMLResponse
+    fastapi.JSONResponse = JSONResponse
+    fastapi.RedirectResponse = RedirectResponse
+    fastapi.TemplateResponse = TemplateResponseStub
+    fastapi.Jinja2Templates = Jinja2Templates
     fastapi.APIRouter = APIRouter
-    fastapi.Depends = DependsStub
-    fastapi.Query = QueryStub
+    fastapi.FastAPI = FastAPI
     fastapi.HTTPException = HTTPException
     fastapi.status = status
-    fastapi.Request = Request
-    fastapi.responses = types.SimpleNamespace(
-        HTMLResponse=HTMLResponse,
-        JSONResponse=JSONResponse,
-        RedirectResponse=RedirectResponse,
-        Response=Response,
-    )
+    fastapi.security = types.SimpleNamespace(HTTPBasic=HTTPBasicStub, HTTPBasicCredentials=HTTPBasicCredentialsStub)
+    fastapi.TestClient = TestClient
+
     sys.modules["fastapi"] = fastapi
-
-    responses_mod = types.ModuleType("fastapi.responses")
-    responses_mod.HTMLResponse = HTMLResponse
-    responses_mod.JSONResponse = JSONResponse
-    responses_mod.RedirectResponse = RedirectResponse
-    responses_mod.Response = Response
-    sys.modules["fastapi.responses"] = responses_mod
-
-    templating_mod = types.ModuleType("fastapi.templating")
-    templating_mod.Jinja2Templates = Jinja2Templates
-    sys.modules["fastapi.templating"] = templating_mod
-
-    security_mod = types.ModuleType("fastapi.security")
-    security_mod.HTTPBasic = HTTPBasic
-    security_mod.HTTPBasicCredentials = HTTPBasicCredentials
-    sys.modules["fastapi.security"] = security_mod
-
-    testclient_mod = types.ModuleType("fastapi.testclient")
-    testclient_mod.TestClient = TestClient
-    sys.modules["fastapi.testclient"] = testclient_mod
-
+    sys.modules["fastapi.security"] = fastapi.security
+    sys.modules["fastapi.templating"] = fastapi
+    sys.modules["fastapi.responses"] = fastapi
+    sys.modules["fastapi.testclient"] = types.SimpleNamespace(TestClient=TestClient)
 
 
 # Provide a small Typer stub when typer is unavailable to keep CLI tests

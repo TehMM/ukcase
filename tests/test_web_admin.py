@@ -153,3 +153,8 @@ def test_runs_and_run_detail_views(client, db_session, segment):
     assert detail_response.status_code == 200
     assert run.status in detail_response.text
     assert item.canonical_uri in detail_response.text
+
+
+def test_run_detail_missing_returns_404(client, segment):
+    response = client.get("/admin/runs/9999", auth=("adminuser", "securepass"))
+    assert response.status_code == 404

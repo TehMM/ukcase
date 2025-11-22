@@ -35,7 +35,9 @@ Scraping modules overview:
   - create_app() builds a FastAPI app with /healthz, admin routes, and webhook routes mounted.
   - Admin UI uses HTTP Basic auth (settings.admin_username/password) and Jinja2 templates (app/templates) with HTMX/Alpine for progressive enhancement.
   - Routes include /admin/segments (list + trigger backfill/incremental via pipeline entrypoints), /admin/runs (recent runs), and /admin/runs/{id} (details + items).
-  - ChangeDetection.io webhook lives at POST /webhook/changedetection with query params secret + segment_id. The secret must match settings.changedetection_webhook_secret; otherwise 403 is returned. Successful calls trigger run_incremental_for_segment.
+  - Route handlers are synchronous (def) so FastAPI executes blocking pipeline work in the threadpool until a proper job queue is added.
+  - /admin/runs/{id} returns 404 when the requested run does not exist.
+  - ChangeDetection.io webhook lives at POST /webhook/changedetection with query params secret + segment_id. The secret must match settings.changedetection_webhook_secret; otherwise 403 is returned. The endpoint validates the segment exists (404 when missing) before triggering run_incremental_for_segment.
 """
 
 DATABASE_SCHEMA = r"""

@@ -106,12 +106,13 @@ Uses Jinja2 + HTMX for a simple admin UI.
 - Admin pages:
   - `/admin/segments` lists segments and provides HTMX buttons to trigger backfill or incremental runs per segment. Buttons POST to `/admin/segments/{segment_id}/run/backfill` and `/admin/segments/{segment_id}/run/incremental` and render small partials with run status/counters.
   - `/admin/runs` lists up to 50 recent runs via `crud.list_recent_runs` with links to details.
-  - `/admin/runs/{run_id}` shows run metadata and associated RunItems (canonical_uri, status, error_message) fetched via `crud.get_run_with_items`.
+  - `/admin/runs/{run_id}` shows run metadata and associated RunItems (canonical_uri, status, error_message) fetched via `crud.get_run_with_items`; returns HTTP 404 when the run is missing.
   - Templates include HTMX + Alpine from CDNs via `app/templates/base.html`.
+- Route handlers are synchronous (`def`) so FastAPI runs blocking pipeline calls in its threadpool until a queue is added.
 - Webhook: ChangeDetection.io
   - Endpoint: `POST /webhook/changedetection`.
   - Query parameters: `segment_id` (int), `secret` (str).
-  - Secret must match `UKCASE_CHANGEDTECTION_WEBHOOK_SECRET` (settings.changedetection_webhook_secret) or the endpoint returns HTTP 403.
+  - Secret must match `UKCASE_CHANGEDTECTION_WEBHOOK_SECRET` (settings.changedetection_webhook_secret) or the endpoint returns HTTP 403. If the segment does not exist, the endpoint returns HTTP 404.
   - On success, triggers `pipeline.run_incremental_for_segment(segment_id)` and returns a JSON summary (run_id, segment_id, status, total_entries, new_judgments, skipped_existing, failed_items).
   - Example CD.io notification URL: `https://example.com/webhook/changedetection?segment_id=12&secret=YOUR_SECRET`.
 

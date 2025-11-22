@@ -3,13 +3,15 @@ from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
+from app.db import crud
+from app.db.base import SessionLocal
 from app.scraping import pipeline
 
 router = APIRouter()
 
 
 @router.post("/webhook/changedetection")
-async def webhook_changedetection(
+def webhook_changedetection(
     segment_id: int = Query(...),
     secret: str = Query(...),
 ):
@@ -20,6 +22,13 @@ async def webhook_changedetection(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid webhook secret",
         )
+
+    with SessionLocal() as session:
+        if crud.get_segment_by_id(session, segment_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Segment not found",
+            )
 
     result = pipeline.run_incremental_for_segment(segment_id)
     return JSONResponse(

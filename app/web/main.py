@@ -11,7 +11,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="ukcase admin")
 
     @app.get("/healthz")
-    async def healthz() -> dict[str, str]:
+    def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
     app.include_router(admin_router)

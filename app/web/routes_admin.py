@@ -4,21 +4,22 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.db import crud
+from app.db.crud import RunNotFoundError
+from app.scraping import pipeline
 from app.web.auth import get_current_admin
 from app.web.deps import get_db
 from app.web.templates import templates
-from app.scraping import pipeline
 
 router = APIRouter()
 
 
 @router.get("/", response_class=RedirectResponse)
-async def root() -> RedirectResponse:
+def root() -> RedirectResponse:
     return RedirectResponse(url="/admin/segments", status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/admin/segments", response_class=HTMLResponse)
-async def segments_index(
+def segments_index(
     request: Request,
     db: Session = Depends(get_db),
     _: str = Depends(get_current_admin),
@@ -34,7 +35,7 @@ async def segments_index(
 
 
 @router.post("/admin/segments/{segment_id}/run/backfill", response_class=HTMLResponse)
-async def run_backfill(
+def run_backfill(
     request: Request,
     segment_id: int,
     db: Session = Depends(get_db),
@@ -55,7 +56,7 @@ async def run_backfill(
 
 
 @router.post("/admin/segments/{segment_id}/run/incremental", response_class=HTMLResponse)
-async def run_incremental(
+def run_incremental(
     request: Request,
     segment_id: int,
     db: Session = Depends(get_db),
@@ -76,7 +77,7 @@ async def run_incremental(
 
 
 @router.get("/admin/runs", response_class=HTMLResponse)
-async def runs_index(
+def runs_index(
     request: Request,
     db: Session = Depends(get_db),
     _: str = Depends(get_current_admin),
@@ -92,7 +93,7 @@ async def runs_index(
 
 
 @router.get("/admin/runs/{run_id}", response_class=HTMLResponse)
-async def run_detail(
+def run_detail(
     run_id: int,
     request: Request,
     db: Session = Depends(get_db),
@@ -100,7 +101,7 @@ async def run_detail(
 ) -> HTMLResponse:
     try:
         run, items = crud.get_run_with_items(db, run_id)
-    except ValueError as exc:  # pragma: no cover - defensive, covered in tests via exception path
+    except RunNotFoundError as exc:  # pragma: no cover - defensive, covered in tests via exception path
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     return templates.TemplateResponse(

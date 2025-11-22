@@ -10,6 +10,10 @@ from app.db.models import Judgment, Run, RunItem, RunType, Segment
 from app.scraping.xml_parse import JudgmentMetadata
 
 
+class RunNotFoundError(LookupError):
+    """Raised when a Run with the requested ID does not exist."""
+
+
 def create_run(
     session: Session,
     *,
@@ -230,7 +234,7 @@ def get_run_with_items(session: Session, run_id: int) -> tuple[Run, list[RunItem
 
     run = session.get(Run, run_id)
     if run is None:
-        raise ValueError(f"Run {run_id} not found")
+        raise RunNotFoundError(f"Run {run_id} not found")
 
     items = (
         session.execute(select(RunItem).where(RunItem.run_id == run.id).order_by(RunItem.id))
