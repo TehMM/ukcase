@@ -14,7 +14,10 @@ dependencies = [
     "pydantic-settings>=2.0",
     "fastapi>=0.110",
     "jinja2>=3.1",
+    "redis>=5.0",
+    "rq>=1.15",
 ]
 
 [project.scripts]
 ukcase = "app.cli:app"
+ukcase-worker = "app.workers.worker:main"
