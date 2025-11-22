@@ -131,8 +131,7 @@ def run_segment(
         session.commit()
 
         try:
-            atom_url = build_atom_url_for_segment(segment)
-            entries = fetch_atom_entries(atom_url)
+            entries = fetch_atom_entries(segment)
             filtered_entries = filter_entries_for_run_type(session, run_type, entries)
 
             if run_type == RunType.INCREMENTAL:

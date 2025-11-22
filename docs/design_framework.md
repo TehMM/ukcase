@@ -184,37 +184,21 @@ CREATE TABLE segments (
     name                TEXT NOT NULL UNIQUE,
     description         TEXT,
 
-    -- Mirrors advanced search fields; keep nullable as they are optional
     query               TEXT,           -- main keyword/text query
     courts              TEXT[],         -- e.g. ['ewhc/ch', 'ewhc/comm']
-    -- Additional advanced search fields for future use:
-    party               TEXT,
-    judge_filter        TEXT,
-    neutral_citation_filter TEXT,
-    date_from           DATE,
-    date_to             DATE,
+    decision_date_from  DATE,
+    decision_date_to    DATE,
 
-    -- Raw Atom URL override (if provided, we ignore the above fields for feed construction)
-    raw_atom_url        TEXT,
-
-    -- Backfill behaviour: 'NEW_ONLY', 'FULL', 'SINCE_DATE'
     backfill_mode       TEXT NOT NULL DEFAULT 'NEW_ONLY',
-    backfill_since_date DATE,          -- only used when backfill_mode = 'SINCE_DATE'
+    rate_limit_seconds  NUMERIC NOT NULL DEFAULT 1.5, -- default ~1 request / 1.5s
 
-    -- Rate limiting: seconds between requests (per segment override)
-    rate_limit_seconds  NUMERIC(6, 2) DEFAULT 1.5, -- default ~1 request / 1.5s
-
-    -- ChangeDetection.io integration
-    changedetection_token TEXT UNIQUE, -- token segment mapping for webhook
-
-    active              BOOLEAN NOT NULL DEFAULT TRUE,
+    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
 
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_segments_active ON segments (active);
-CREATE INDEX idx_segments_changedetection_token ON segments (changedetection_token);
+CREATE INDEX idx_segments_active ON segments (is_active);
 
 
 -- 2. Judgments: canonical store of all judgments we know about
@@ -391,25 +375,15 @@ query – text query (can be NULL).
 
 courts – array of court codes (e.g. ['ewhc/ch', 'ewhc/comm', 'ewhc/kb']).
 
-Optionally in future:
+decision_date_from / decision_date_to – optional bounds for decision date filters.
 
-party, judge_filter, neutral_citation_filter, date_from, date_to.
-
-raw_atom_url – if set, we ignore the above and use this URL verbatim.
-
-backfill_mode:
-
-NEW_ONLY (default) – only incremental “since last seen”.
-
-FULL – attempt to ingest everything the feed currently exposes.
-
-SINCE_DATE – only ingest items with decision date ≥ backfill_since_date.
+backfill_mode – scraper behaviour hint, default NEW_ONLY (process new items only) or FULL_HISTORY for full backfill.
 
 rate_limit_seconds – per-segment override; default is from env (1.5s).
 
-5.2 Atom URL Construction (Default)
+is_active – whether the segment participates in scheduled/surfaced lists.
 
-For segments without raw_atom_url:
+5.2 Atom URL Construction (Default)
 
 Base: https://caselaw.nationalarchives.gov.uk/atom.xml
 
@@ -419,7 +393,7 @@ query = segment.query (if not null)
 
 court = each element of segment.courts as repeated parameter
 
-In future: date_from, date_to, etc., if the API supports them.
+decision_date_from / decision_date_to = ISO date strings if provided.
 
 Example:
 
@@ -1026,3 +1000,17 @@ Relevant code
 Tests
 
 This framework (if root cause reveals a missing/unclear design decision).
+
+10. CLI & Segment Management
+
+Typer-based CLI lives in `app/cli.py` exposed via the `ukcase` console script. Commands:
+
+* `ukcase segment list` – list configured segments.
+* `ukcase segment create NAME --query ... --court ewhc/ch --court ewhc/comm --decision-date-from 2020-01-01 --decision-date-to 2020-12-31 --backfill-mode FULL_HISTORY --rate-limit-seconds 2.0 --is-active/--no-is-active` – create a segment.
+* `ukcase segment show SEGMENT_ID` – show full configuration.
+* `ukcase segment update SEGMENT_ID --query ... --court ... --backfill-mode ... --rate-limit-seconds ... --is-active/--no-is-active` – update an existing segment.
+* `ukcase segment delete SEGMENT_ID` – remove a segment.
+* `ukcase run backfill SEGMENT_ID [--max-entries N]` – trigger a backfill run for a segment.
+* `ukcase run incremental SEGMENT_ID` – trigger an incremental run for a segment.
+
+Run commands delegate to `pipeline.run_backfill_for_segment` and `pipeline.run_incremental_for_segment`, ensuring consistent run tracking semantics.

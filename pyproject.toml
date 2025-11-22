@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ukcase"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.9",
+    "sqlalchemy>=2.0",
+    "httpx>=0.24",
+    "feedparser>=6.0",
+    "pydantic-settings>=2.0",
+]
+
+[project.scripts]
+ukcase = "app.cli:app"

@@ -4,6 +4,10 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
+from datetime import date, datetime, timezone
+from typing import Optional
+
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Judgment, Run, RunItem, RunType, Segment
@@ -147,3 +151,72 @@ def mark_run_item_skipped_existing(
     item.status = "SKIPPED_EXISTING"
     item.judgment_id = judgment_id
     item.finished_at = datetime.now(timezone.utc)
+
+
+def list_segments(session: Session) -> list[Segment]:
+    """Return all segments ordered by id."""
+
+    stmt = select(Segment).order_by(Segment.id)
+    return list(session.execute(stmt).scalars())
+
+
+def get_segment_by_id(session: Session, segment_id: int) -> Optional[Segment]:
+    """Return a Segment by id or None if it does not exist."""
+
+    return session.get(Segment, segment_id)
+
+
+def get_segment_by_name(session: Session, name: str) -> Optional[Segment]:
+    """Return a Segment by name or None if not found."""
+
+    stmt = select(Segment).where(Segment.name == name)
+    return session.execute(stmt).scalar_one_or_none()
+
+
+def create_segment(
+    session: Session,
+    *,
+    name: str,
+    description: Optional[str] = None,
+    query: Optional[str] = None,
+    courts: Optional[list[str]] = None,
+    decision_date_from: Optional[date] = None,
+    decision_date_to: Optional[date] = None,
+    backfill_mode: str = "NEW_ONLY",
+    rate_limit_seconds: float = 1.5,
+    is_active: bool = True,
+) -> Segment:
+    """Create and persist a Segment with the provided fields."""
+
+    segment = Segment(
+        name=name,
+        description=description,
+        query=query,
+        courts=courts,
+        decision_date_from=decision_date_from,
+        decision_date_to=decision_date_to,
+        backfill_mode=backfill_mode,
+        rate_limit_seconds=rate_limit_seconds,
+        is_active=is_active,
+    )
+    session.add(segment)
+    session.flush()
+    return segment
+
+
+def update_segment(session: Session, segment: Segment, **fields: object) -> Segment:
+    """Update attributes on a Segment instance and flush the session."""
+
+    for key, value in fields.items():
+        if not hasattr(segment, key):
+            raise AttributeError(f"Segment has no attribute {key!r}")
+        setattr(segment, key, value)
+    session.flush()
+    return segment
+
+
+def delete_segment(session: Session, segment: Segment) -> None:
+    """Delete a Segment instance and flush the session."""
+
+    session.delete(segment)
+    session.flush()

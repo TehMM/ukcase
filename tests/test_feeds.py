@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 import pathlib
 import sys
@@ -115,21 +115,21 @@ def _mock_settings(monkeypatch):
     monkeypatch.setattr(feeds, "get_settings", lambda: fake_settings)
 
 
-def test_build_atom_url_with_query_and_courts():
-    segment = SimpleNamespace(query="fiduciary", courts=["ewhc/ch", "ewhc/comm"], raw_atom_url=None)
+def test_build_atom_url_with_query_courts_and_dates():
+    segment = SimpleNamespace(
+        query="fiduciary",
+        courts=["ewhc/ch", "ewhc/comm"],
+        decision_date_from=date(2020, 1, 1),
+        decision_date_to=date(2020, 12, 31),
+    )
 
     url = feeds.build_atom_url_for_segment(segment)
 
     assert url == (
         "https://caselaw.nationalarchives.gov.uk/atom.xml?"
-        "query=fiduciary&court=ewhc%2Fch&court=ewhc%2Fcomm"
+        "query=fiduciary&decision_date_from=2020-01-01&decision_date_to=2020-12-31&"
+        "court=ewhc%2Fch&court=ewhc%2Fcomm"
     )
-
-
-def test_build_atom_url_raw_override():
-    segment = SimpleNamespace(raw_atom_url="https://example.com/custom.atom")
-
-    assert feeds.build_atom_url_for_segment(segment) == "https://example.com/custom.atom"
 
 
 @pytest.fixture

@@ -103,7 +103,7 @@ def stub_pipeline_dependencies(
     metadata_factory: Callable[[bytes], JudgmentMetadata],
 ):
     monkeypatch.setattr(pipeline, "build_atom_url_for_segment", lambda segment: "http://example.com/feed")
-    monkeypatch.setattr(pipeline, "fetch_atom_entries", lambda url: entries)
+    monkeypatch.setattr(pipeline, "fetch_atom_entries", lambda seg: entries)
     monkeypatch.setattr(pipeline, "respect_rate_limit", lambda segment: None)
     monkeypatch.setattr(pipeline, "download_xml_for_canonical_uri", lambda canonical_uri: (f"http://example.com{canonical_uri}/data.xml", b"<xml></xml>"))
     monkeypatch.setattr(pipeline, "store_xml_to_disk", lambda canonical_uri, xml_bytes: xml_path_factory(canonical_uri))

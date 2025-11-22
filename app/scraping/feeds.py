@@ -7,6 +7,12 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, List, Optional
 from urllib.parse import urlencode, urljoin, urlsplit
 
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, List, Optional, TYPE_CHECKING
+from urllib.parse import urlencode, urljoin, urlsplit
+
 import feedparser
 import httpx
 
@@ -39,19 +45,20 @@ class AtomEntry:
 def build_atom_url_for_segment(segment: Segment) -> str:
     """Construct the Atom feed URL for a segment following the design spec."""
 
-    # TODO: support party, judge_filter, neutral_citation_filter, date_from, and date_to
-    # when the Atom API parameters for these fields are confirmed.
-    raw_atom_url = getattr(segment, "raw_atom_url", None)
-    if raw_atom_url:
-        return raw_atom_url
-
     query_params = {}
     query_value = getattr(segment, "query", None)
     if query_value:
         query_params["query"] = query_value
 
+    decision_date_from = getattr(segment, "decision_date_from", None)
+    decision_date_to = getattr(segment, "decision_date_to", None)
+    if decision_date_from is not None:
+        query_params["decision_date_from"] = decision_date_from.isoformat()
+    if decision_date_to is not None:
+        query_params["decision_date_to"] = decision_date_to.isoformat()
+
     courts = getattr(segment, "courts", None) or []
-    # feed expects repeated court params
+
     encoded_params = []
     if query_params:
         encoded_params.append(urlencode(query_params))

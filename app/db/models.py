@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import date, datetime
 import enum
 from decimal import Decimal
+import enum
+from datetime import date, datetime
+from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, Text, func, text
@@ -20,8 +23,7 @@ class RunType(str, enum.Enum):
 class Segment(Base):
     __tablename__ = "segments"
     __table_args__ = (
-        Index("idx_segments_active", "active"),
-        Index("idx_segments_changedetection_token", "changedetection_token"),
+        Index("idx_segments_active", "is_active"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -30,22 +32,13 @@ class Segment(Base):
 
     query: Mapped[Optional[str]] = mapped_column(Text)
     courts: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text))
-    party: Mapped[Optional[str]] = mapped_column(Text)
-    judge_filter: Mapped[Optional[str]] = mapped_column(Text)
-    neutral_citation_filter: Mapped[Optional[str]] = mapped_column(Text)
-    date_from: Mapped[Optional[date]] = mapped_column(Date)
-    date_to: Mapped[Optional[date]] = mapped_column(Date)
-
-    raw_atom_url: Mapped[Optional[str]] = mapped_column(Text)
+    decision_date_from: Mapped[Optional[date]] = mapped_column(Date)
+    decision_date_to: Mapped[Optional[date]] = mapped_column(Date)
 
     backfill_mode: Mapped[str] = mapped_column(Text, server_default=text("'NEW_ONLY'"), nullable=False)
-    backfill_since_date: Mapped[Optional[date]] = mapped_column(Date)
+    rate_limit_seconds: Mapped[Decimal] = mapped_column(Numeric, nullable=False, server_default=text("1.5"))
 
-    rate_limit_seconds: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2), server_default=text("1.5"))
-
-    changedetection_token: Mapped[Optional[str]] = mapped_column(Text, unique=True)
-
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
