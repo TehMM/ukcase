@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Recent Runs</h1>
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Segment</th>
+      <th>Run Type</th>
+      <th>Status</th>
+      <th>Started</th>
+      <th>Finished</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for run in runs %}
+    <tr>
+      <td><a href="/admin/runs/{{ run.id }}">{{ run.id }}</a></td>
+      <td>{{ run.segment_id }}</td>
+      <td>{{ run.run_type }}</td>
+      <td>{{ run.status }}</td>
+      <td>{{ run.started_at }}</td>
+      <td>{{ run.finished_at }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

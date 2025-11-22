@@ -1,7 +1,13 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import os
 import sys
+import textwrap
+import time
 import types
+import xml.etree.ElementTree as ET
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -80,6 +86,9 @@ if "sqlalchemy" not in sys.modules:  # pragma: no cover
         def order_by(self, *args, **kwargs):
             return self
 
+        def limit(self, _limit):
+            return self
+
         def first(self):
             return self._results[0] if self._results else None
 
@@ -102,6 +111,9 @@ if "sqlalchemy" not in sys.modules:  # pragma: no cover
         def __iter__(self):
             return iter(self._rows)
 
+        def all(self):
+            return list(self._rows)
+
     class FakeSelect:
         def __init__(self, model):
             self.model = model
@@ -112,6 +124,9 @@ if "sqlalchemy" not in sys.modules:  # pragma: no cover
             return self
 
         def order_by(self, *args, **kwargs):
+            return self
+
+        def limit(self, _limit):
             return self
 
         def execute(self, session):
@@ -211,6 +226,112 @@ if "sqlalchemy" not in sys.modules:  # pragma: no cover
     sys.modules["sqlalchemy.dialects.postgresql"] = postgres
 
 
+# Provide a lightweight feedparser stub for tests (always overrides the real
+# library if it has not been imported yet). This avoids a hard dependency on
+# feedparser and keeps tests hermetic.
+if "feedparser" not in sys.modules:  # pragma: no cover
+    feedparser = types.ModuleType("feedparser")
+
+    def _parse_feed(text: str = "", **_: object):
+        entries: list[dict[str, object]] = []
+        if not isinstance(text, str):
+            return types.SimpleNamespace(entries=entries, bozo=False)
+
+        content = textwrap.dedent(text).strip()
+        if not content:
+            return types.SimpleNamespace(entries=entries, bozo=False)
+
+        try:
+            root = ET.fromstring(content)
+        except ET.ParseError:
+            return types.SimpleNamespace(entries=entries, bozo=False)
+
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+
+        def _parse_time(element: ET.Element | None) -> time.struct_time | None:
+            if element is None or not element.text:
+                return None
+            try:
+                dt = datetime.fromisoformat(element.text.replace("Z", ""))
+            except Exception:
+                return None
+            return dt.timetuple()
+
+        for entry_el in root.findall("atom:entry", ns):
+            entry: dict[str, object] = {}
+
+            id_el = entry_el.find("atom:id", ns)
+            if id_el is not None:
+                entry["id"] = id_el.text
+
+            link_el = entry_el.find("atom:link", ns)
+            if link_el is not None:
+                entry["link"] = link_el.attrib.get("href")
+
+            title_el = entry_el.find("atom:title", ns)
+            if title_el is not None:
+                entry["title"] = title_el.text
+
+            updated = _parse_time(entry_el.find("atom:updated", ns))
+            if updated:
+                entry["updated_parsed"] = updated
+
+            published = _parse_time(entry_el.find("atom:published", ns))
+            if published:
+                entry["published_parsed"] = published
+
+            entries.append(entry)
+
+        return types.SimpleNamespace(entries=entries, bozo=False)
+
+    feedparser.parse = _parse_feed
+    sys.modules["feedparser"] = feedparser
+
+
+# Provide a minimal httpx stub so imports succeed without the dependency.
+if "httpx" not in sys.modules:  # pragma: no cover
+    httpx = types.ModuleType("httpx")
+
+    class _Codes:
+        OK = 200
+        TOO_MANY_REQUESTS = 429
+
+    class _Request:
+        def __init__(self, url: str):
+            self.url = url
+
+    class Response:
+        def __init__(self, text: str = "", status_code: int = 200, url: str = "", content=None):
+            self.text = text
+            self.content = content if content is not None else text.encode()
+            self.status_code = status_code
+            self.request = _Request(url)
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise HTTPStatusError(
+                    f"Unexpected status code {self.status_code}",
+                    request=self.request,
+                    response=self,
+                )
+
+    class HTTPStatusError(Exception):
+        def __init__(self, message: str, request=None, response=None):
+            super().__init__(message)
+            self.request = request
+            self.response = response
+
+    def get(url: str, timeout=None, headers=None):
+        return Response(text="", status_code=_Codes.OK, url=url)
+
+    httpx.codes = _Codes()
+    httpx.HTTPStatusError = HTTPStatusError
+    httpx.Response = Response
+    httpx.get = get
+
+    sys.modules["httpx"] = httpx
+
+
 # Provide a minimal pydantic_settings stub so tests do not require the real
 # dependency.
 if "pydantic_settings" not in sys.modules:  # pragma: no cover
@@ -221,6 +342,18 @@ if "pydantic_settings" not in sys.modules:  # pragma: no cover
             for key, value in kwargs.items():
                 setattr(self, key, value)
 
+            for env_key, attr in {
+                "UKCASE_ADMIN_USERNAME": "admin_username",
+                "UKCASE_ADMIN_PASSWORD": "admin_password",
+                "UKCASE_CHANGEDTECTION_WEBHOOK_SECRET": "changedetection_webhook_secret",
+                "UKCASE_DATABASE_URL": "database_url",
+                "UKCASE_REDIS_URL": "redis_url",
+                "UKCASE_HTTP_USER_AGENT": "http_user_agent",
+                "UKCASE_XML_STORAGE_ROOT": "xml_storage_root",
+            }.items():
+                if env_key in os.environ and not getattr(self, attr, None):
+                    setattr(self, attr, os.environ[env_key])
+
     class SettingsConfigDict(dict):
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
@@ -230,204 +363,471 @@ if "pydantic_settings" not in sys.modules:  # pragma: no cover
     sys.modules["pydantic_settings"] = pydantic_settings
 
 
-# Provide a small Typer stub when typer is unavailable to keep CLI tests
-# lightweight.
-if "typer" not in sys.modules:  # pragma: no cover
-    typer = types.ModuleType("typer")
-    typer_output: list[str] = []
+# Provide a lightweight FastAPI stub only when the dependency is missing.
+try:  # pragma: no cover
+    import fastapi  # noqa: F401
+except ImportError:  # pragma: no cover
+    import base64
+    import inspect
+    import json
 
-    class BadParameter(Exception):
+    fastapi = types.ModuleType("fastapi")
+
+    class HTTPException(Exception):
+        def __init__(self, status_code: int, detail: str | None = None, headers: dict | None = None):
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
+            self.headers = headers or {}
+
+    class Depends:
+        def __init__(self, dependency):
+            self.dependency = dependency
+
+    class Query:
+        def __init__(self, default=...):
+            self.default = default
+
+    class Request:
+        def __init__(self, headers=None, auth=None, query_params=None):
+            self.headers = headers or {}
+            self.auth = auth
+            self.query_params = query_params or {}
+
+    class Response:
+        def __init__(self, content="", status_code: int = 200, headers=None):
+            self.content = content
+            self.text = content if isinstance(content, str) else str(content)
+            self.status_code = status_code
+            self.headers = headers or {}
+
+        def json(self):
+            return json.loads(self.text)
+
+    class HTMLResponse(Response):
         pass
 
-    class Typer:
-        def __init__(self, *args, **kwargs):
-            self.commands = {}
-            self.subapps = {}
+    class JSONResponse(Response):
+        def __init__(self, content=None, status_code: int = 200, headers=None):
+            import json as _json
 
-        def command(self, *args, **kwargs):
-            name = args[0] if args else None
+            super().__init__(
+                content=_json.dumps(content or {}),
+                status_code=status_code,
+                headers=headers,
+            )
 
+    class RedirectResponse(Response):
+        def __init__(self, url: str, status_code: int = 302, headers=None):
+            headers = headers or {}
+            headers.setdefault("location", url)
+            super().__init__(content="", status_code=status_code, headers=headers)
+
+    def _render_template(context):
+        parts: list[str] = []
+        if "segments" in context:
+            names = [getattr(seg, "name", str(seg)) for seg in context["segments"]]
+            parts.append(";".join(names))
+        if "result" in context:
+            res = context["result"]
+            run_status = getattr(getattr(res, "run", None), "status", "")
+            parts.append(
+                f"{run_status} new={res.new_judgments} skipped={res.skipped_existing} failed={res.failed_items}"
+            )
+        if "runs" in context:
+            parts.append(
+                ",".join(str(getattr(run, "id", run)) for run in context.get("runs", []))
+            )
+        if "run" in context:
+            run = context["run"]
+            parts.append(str(getattr(run, "status", "")))
+            parts.append(str(getattr(run, "id", "")))
+        if "items" in context:
+            parts.append(
+                ",".join(getattr(item, "canonical_uri", str(item)) for item in context.get("items", []))
+            )
+        return " | ".join([part for part in parts if part]) or ""
+
+    class TemplateResponse(HTMLResponse):
+        def __init__(self, template_name: str, context: dict, status_code: int = 200):
+            super().__init__(content=_render_template(context), status_code=status_code)
+
+    class Jinja2Templates:
+        def __init__(self, directory: str):
+            self.directory = directory
+
+        def TemplateResponse(self, template_name: str, context: dict, status_code: int = 200):
+            return TemplateResponse(template_name, context, status_code=status_code)
+
+    class _Status:
+        HTTP_401_UNAUTHORIZED = 401
+        HTTP_403_FORBIDDEN = 403
+        HTTP_404_NOT_FOUND = 404
+        HTTP_422_UNPROCESSABLE_ENTITY = 422
+        HTTP_302_FOUND = 302
+
+    status = _Status()
+
+    class _Route:
+        def __init__(self, path, method, func):
+            self.path = path
+            self.method = method
+            self.func = func
+
+    class APIRouter:
+        def __init__(self):
+            self.routes = []
+
+        def get(self, path, response_class=HTMLResponse):
             def decorator(func):
-                cmd_name = name or func.__name__.replace("_", "-")
-                self.commands[cmd_name] = func
+                self.routes.append(_Route(path, "GET", func))
                 return func
 
             return decorator
 
-        def add_typer(self, app, name=None):
-            if name is not None:
-                self.subapps[name] = app
+        def post(self, path, response_class=HTMLResponse):
+            def decorator(func):
+                self.routes.append(_Route(path, "POST", func))
+                return func
 
-        def __call__(self, *args, **kwargs):
+            return decorator
+
+    def _match_route(path: str, pattern: str):
+        path_parts = path.strip("/").split("/")
+        pattern_parts = pattern.strip("/").split("/")
+        if len(path_parts) != len(pattern_parts):
             return None
+        params = {}
+        for path_part, pattern_part in zip(path_parts, pattern_parts):
+            if pattern_part.startswith("{") and pattern_part.endswith("}"):
+                name = pattern_part.strip("{}")
+                params[name] = path_part
+            elif path_part != pattern_part:
+                return None
+        return params
 
-    def echo(message, err=False):
-        typer_output.append(f"{message}\n")
+    def _resolve_dependencies(func, request, path_params, query_params):
+        signature = inspect.signature(func)
+        kwargs = {}
+        for name, param in signature.parameters.items():
+            default = param.default
+            if isinstance(default, Query):
+                value = query_params.get(name, default.default if default.default is not inspect._empty else None)
+                if param.annotation is int:
+                    try:
+                        value = int(value)
+                    except Exception:
+                        pass
+                kwargs[name] = value
+                continue
+            if isinstance(default, Depends):
+                dep = default.dependency
+                if isinstance(dep, HTTPBasic):
+                    kwargs[name] = dep(request)
+                    continue
+                if callable(dep):
+                    dep_kwargs = _resolve_dependencies(dep, request, path_params, query_params)
+                    value = dep(**dep_kwargs)
+                else:
+                    value = dep
+                if hasattr(value, "__iter__") and not isinstance(value, (str, bytes, dict)):
+                    try:
+                        value = next(value)
+                    except StopIteration:
+                        value = None
+                kwargs[name] = value
+                continue
+            if name in path_params:
+                value = path_params[name]
+                if param.annotation is int:
+                    try:
+                        value = int(value)
+                    except Exception:
+                        pass
+                kwargs[name] = value
+                continue
+            kwargs[name] = default if default is not inspect._empty else None
+        return kwargs
 
-    def Argument(*args, default=None, **kwargs):
-        return default if default is not None else (args[0] if args else None)
+    class TestResponse:
+        def __init__(self, response: Response):
+            self.status_code = response.status_code
+            self.headers = {k.lower(): v for k, v in response.headers.items()}
+            self.text = response.text
+            self.content = response.content
 
-    def Option(*args, default=None, **kwargs):
-        return default if default is not None else (args[0] if args else None)
+        def json(self):
+            import json as _json
 
-    def Exit(code=0):  # pragma: no cover
-        raise SystemExit(code)
+            return _json.loads(self.text)
 
-    typer.Typer = Typer
-    typer.echo = echo
-    typer.Exit = Exit
-    typer.Argument = Argument
-    typer.Option = Option
-    sys.modules["typer"] = typer
+    class TestClient:
+        def __init__(self, app):
+            self.app = app
 
-    testing = types.ModuleType("typer.testing")
+        def _find_route(self, method: str, path: str):
+            for route in self.app.routes:
+                params = _match_route(path, route.path)
+                if route.method == method and params is not None:
+                    return route, params
+            for router in getattr(self.app, "routers", []):
+                for route in router.routes:
+                    params = _match_route(path, route.path)
+                    if route.method == method and params is not None:
+                        return route, params
+            return None, None
 
-    class Result:
-        def __init__(self, exit_code=0, stdout=""):
+        def _handle(self, method: str, path: str, params=None, auth=None, data=None):
+            params = params or {}
+            route, path_params = self._find_route(method, path)
+            if route is None:
+                return TestResponse(Response(status_code=404, content="Not found"))
+            request = Request(headers={}, auth=auth, query_params=params)
+            try:
+                kwargs = _resolve_dependencies(route.func, request, path_params or {}, params)
+                result = route.func(**kwargs)
+                if inspect.iscoroutine(result):
+                    import asyncio
+
+                    result = asyncio.run(result)
+            except HTTPException as exc:
+                return TestResponse(Response(content=str(exc.detail), status_code=exc.status_code, headers=exc.headers))
+            if isinstance(result, Response):
+                return TestResponse(result)
+            if isinstance(result, dict):
+                return TestResponse(JSONResponse(result))
+            return TestResponse(Response(result or ""))
+
+        def get(self, path: str, params=None, auth=None):
+            return self._handle("GET", path, params=params, auth=auth)
+
+        def post(self, path: str, params=None, auth=None, data=None):
+            return self._handle("POST", path, params=params, auth=auth, data=data)
+
+    class FastAPI(APIRouter):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+            self.routers = []
+
+        def include_router(self, router: APIRouter):
+            self.routers.append(router)
+
+    class HTTPBasicCredentials:
+        def __init__(self, username: str, password: str):
+            self.username = username
+            self.password = password
+
+    class HTTPBasic:
+        def __call__(self, request: Request) -> HTTPBasicCredentials:
+            username = password = None
+            if request.auth:
+                username, password = request.auth
+            elif "authorization" in {k.lower() for k in request.headers}:
+                header_value = request.headers.get("Authorization") or request.headers.get("authorization")
+                if header_value and header_value.startswith("Basic "):
+                    encoded = header_value.split(" ", 1)[1]
+                    decoded = base64.b64decode(encoded).decode()
+                    username, password = decoded.split(":", 1)
+
+            if username is None or password is None:
+                raise HTTPException(
+                    status_code=_Status.HTTP_401_UNAUTHORIZED,
+                    detail="Not authenticated",
+                    headers={"WWW-Authenticate": "Basic"},
+                )
+            return HTTPBasicCredentials(username=username, password=password)
+
+    fastapi.HTTPException = HTTPException
+    fastapi.Depends = Depends
+    fastapi.Query = Query
+    fastapi.Request = Request
+    fastapi.Response = Response
+    fastapi.HTMLResponse = HTMLResponse
+    fastapi.JSONResponse = JSONResponse
+    fastapi.RedirectResponse = RedirectResponse
+    fastapi.APIRouter = APIRouter
+    fastapi.FastAPI = FastAPI
+    fastapi.status = status
+    fastapi.security = types.SimpleNamespace(HTTPBasic=HTTPBasic, HTTPBasicCredentials=HTTPBasicCredentials)
+    fastapi.responses = types.SimpleNamespace(HTMLResponse=HTMLResponse, JSONResponse=JSONResponse, RedirectResponse=RedirectResponse)
+
+    templating = types.ModuleType("fastapi.templating")
+    templating.Jinja2Templates = Jinja2Templates
+
+    testclient = types.ModuleType("fastapi.testclient")
+    testclient.TestClient = TestClient
+
+    sys.modules["fastapi"] = fastapi
+    sys.modules["fastapi.templating"] = templating
+    sys.modules["fastapi.testclient"] = testclient
+    sys.modules["fastapi.security"] = fastapi.security
+    sys.modules["fastapi.responses"] = fastapi.responses
+    sys.modules["starlette"] = types.SimpleNamespace(status=status)
+    sys.modules["starlette.status"] = status
+
+
+# Provide a minimal Typer stub when typer is unavailable.
+try:  # pragma: no cover
+    import typer  # noqa: F401
+    from typer.testing import CliRunner  # noqa: F401
+except ImportError:  # pragma: no cover
+    import contextlib
+    import inspect
+    import io
+    from types import SimpleNamespace
+
+    typer = types.ModuleType("typer")
+
+    class Exit(Exception):
+        def __init__(self, code: int = 0):
+            self.exit_code = code
+
+    class BadParameter(Exception):
+        pass
+
+    class _Param:
+        def __init__(self, default=None):
+            self.default = default
+
+    def echo(message: object, err: bool = False) -> None:
+        output = str(message)
+        if err:
+            print(output, file=sys.stderr)
+        else:
+            print(output)
+
+    def Option(default=None, *args, **kwargs):
+        return _Param(default)
+
+    def Argument(default=..., *args, **kwargs):
+        return _Param(default if default is not ... else None)
+
+    class Typer:
+        def __init__(self, *args, **kwargs):
+            self.commands = {}
+
+        def command(self, name: str):
+            def decorator(func):
+                self.commands[name] = func
+                return func
+
+            return decorator
+
+        def add_typer(self, typer_obj, name: str):
+            self.commands[name] = typer_obj
+
+    def _convert(value, annotation):
+        if annotation is int:
+            try:
+                return int(value)
+            except Exception:
+                return value
+        return value
+
+    class _CliRunnerResult:
+        def __init__(self, exit_code: int, stdout: str):
             self.exit_code = exit_code
             self.stdout = stdout
 
-    class CliRunner:
-        def _call_command(self, app_obj, args):
-            import inspect
+    class _Invoker:
+        def __init__(self, app):
+            self.app = app
 
-            if not args:
-                raise SystemExit(0)
-
-            command_name = args[0]
-            if command_name in app_obj.subapps:
-                return self._call_command(app_obj.subapps[command_name], args[1:])
-
-            func = app_obj.commands.get(command_name)
-            if func is None:
-                raise SystemExit(1)
-
+        def _call(self, func, args):
             sig = inspect.signature(func)
-            positional_args = []
-            options: dict[str, object] = {}
-            remaining = list(args[1:])
-            while remaining:
-                token = remaining.pop(0)
-                if token.startswith("--"):
-                    key = token.lstrip("-").replace("-", "_")
-                    if not remaining:
-                        options[key] = True
-                        continue
-                    value = remaining.pop(0)
-                    options[key] = value
+            params = list(sig.parameters.values())
+            positional_params = [p for p in params if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+            kwargs: dict[str, object] = {}
+            collected_args: list[object] = []
+            iterator = iter(args)
+            for raw in iterator:
+                if raw.startswith("--"):
+                    name = raw.lstrip("-").replace("-", "_")
+                    try:
+                        value = next(iterator)
+                    except StopIteration:
+                        value = None
+                    param = sig.parameters.get(name)
+                    kwargs[name] = _convert(value, param.annotation if param else None)
                 else:
-                    positional_args.append(token)
+                    collected_args.append(raw)
+            for param, value in zip(positional_params, collected_args):
+                kwargs[param.name] = _convert(value, param.annotation)
+            for param in params:
+                if param.name in kwargs:
+                    continue
+                default = param.default
+                if isinstance(default, _Param):
+                    default = default.default
+                if default is inspect._empty:
+                    default = None
+                kwargs[param.name] = default
+            return func(**kwargs)
 
-            bound_args = []
-            kwargs = {}
-            for param in sig.parameters.values():
-                if param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD:
-                    if positional_args:
-                        raw = positional_args.pop(0)
-                        bound_args.append(self._convert(raw, param.annotation))
-                    elif param.name in options:
-                        kwargs[param.name] = self._convert(options[param.name], param.annotation)
-                        continue
-                if param.name in options:
-                    kwargs[param.name] = self._convert(options[param.name], param.annotation)
+        def _dispatch(self, app, args):
+            if not args:
+                raise Exit(code=1)
+            command = args[0]
+            target = app.commands.get(command)
+            if target is None:
+                raise Exit(code=1)
+            if isinstance(target, Typer):
+                if len(args) < 2:
+                    raise Exit(code=1)
+                return self._dispatch(target, args[1:])
+            return self._call(target, args[1:])
 
+        def invoke(self, args):
             try:
-                return func(*bound_args, **kwargs)
-            except BadParameter as exc:
-                echo(str(exc))
-                raise SystemExit(2)
+                return self._dispatch(self.app, args)
+            except Exit as exc:
+                raise exc
 
-        @staticmethod
-        def _convert(value, annotation):
-            if annotation in (int, float):
-                try:
-                    return annotation(value)
-                except Exception:
-                    return value
-            return value
-
+    class CliRunner:
         def invoke(self, app, args):
-            typer_output.clear()
+            buffer = io.StringIO()
             exit_code = 0
             try:
-                self._call_command(app, args)
-            except SystemExit as exc:  # pragma: no cover - mirrors typer behaviour
-                exit_code = exc.code
-            stdout = "".join(typer_output)
-            return Result(exit_code=exit_code, stdout=stdout)
+                with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+                    invoker = _Invoker(app)
+                    invoker.invoke(args)
+            except Exit as exc:
+                exit_code = exc.exit_code
+            except BadParameter as exc:
+                exit_code = 2
+                print(str(exc), file=buffer)
+            stdout = buffer.getvalue()
+            return _CliRunnerResult(exit_code, stdout)
 
-    testing.CliRunner = CliRunner
     typer.BadParameter = BadParameter
-    sys.modules["typer.testing"] = testing
+    typer.Exit = Exit
+    typer.Option = Option
+    typer.Argument = Argument
+    typer.echo = echo
+    typer.Typer = Typer
+
+testing = types.ModuleType("typer.testing")
+testing.CliRunner = CliRunner
+
+sys.modules["typer"] = typer
+sys.modules["typer.testing"] = testing
 
 
-# Provide lightweight feedparser/httpx stubs to keep network-facing code testable
-# without external dependencies.
-if "feedparser" not in sys.modules:  # pragma: no cover
-    feedparser = types.ModuleType("feedparser")
+@pytest.fixture(autouse=True)
+def reset_settings_cache():
+    """Ensure cached settings do not leak across tests when env vars change."""
 
-    def _parse(text):
-        import xml.etree.ElementTree as ET
-        import textwrap
+    try:
+        from app import config as app_config
 
-        ns = {"atom": "http://www.w3.org/2005/Atom"}
-        normalized = textwrap.dedent(text).strip()
-        root = ET.fromstring(normalized)
-        entries = []
-        for elem in root.findall("atom:entry", ns):
-            entry = {}
-            id_elem = elem.find("atom:id", ns)
-            link_elem = elem.find("atom:link", ns)
-            title_elem = elem.find("atom:title", ns)
-            updated_elem = elem.find("atom:updated", ns)
-            published_elem = elem.find("atom:published", ns)
-            if id_elem is not None and id_elem.text:
-                entry["id"] = id_elem.text
-            if link_elem is not None:
-                entry["link"] = link_elem.attrib.get("href")
-            if title_elem is not None and title_elem.text:
-                entry["title"] = title_elem.text
-            if updated_elem is not None and updated_elem.text:
-                entry["updated_parsed"] = datetime.strptime(updated_elem.text, "%Y-%m-%dT%H:%M:%SZ").timetuple()
-            if published_elem is not None and published_elem.text:
-                entry["published_parsed"] = datetime.strptime(published_elem.text, "%Y-%m-%dT%H:%M:%SZ").timetuple()
-            entries.append(entry)
-        return types.SimpleNamespace(entries=entries)
-
-    feedparser.parse = _parse
-    sys.modules["feedparser"] = feedparser
+        app_config.get_settings.cache_clear()
+    except Exception:  # pragma: no cover - defensive
+        pass
+    yield
+    try:
+        app_config.get_settings.cache_clear()
+    except Exception:  # pragma: no cover - defensive
+        pass
 
 
-if "httpx" not in sys.modules:  # pragma: no cover
-    httpx = types.ModuleType("httpx")
 
-    class Response:
-        def __init__(self, status_code: int, text: str = "", content: bytes | None = None, request=None):
-            self.status_code = status_code
-            self.text = text
-            self.content = content if content is not None else text.encode()
-            self.request = request
-
-        def raise_for_status(self):
-            if self.status_code >= 400:
-                raise HTTPStatusError(f"status {self.status_code}", request=self.request, response=self)
-
-    class HTTPStatusError(Exception):
-        def __init__(self, message: str, request=None, response=None):
-            super().__init__(message)
-            self.request = request
-            self.response = response
-
-    class Codes:
-        OK = 200
-        TOO_MANY_REQUESTS = 429
-
-    httpx.Response = Response
-    httpx.HTTPStatusError = HTTPStatusError
-    httpx.codes = Codes()
-
-    def _missing_get(*args, **kwargs):  # pragma: no cover
-        return Response(status_code=200, text="")
-
-    httpx.get = _missing_get
-    sys.modules["httpx"] = httpx
